@@ -1,30 +1,48 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.png">
-    <img alt="Money Mom: let your AI look after your money like Mom would" src="assets/banner-light.png" width="100%">
+    <img alt="Money Mom: let your AI look after your money like a mother" src="assets/banner-light.png" width="100%">
   </picture>
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> &nbsp;·&nbsp; <b>English</b> &nbsp;·&nbsp; <a href="https://imoneys10k.github.io/money-mom/?lang=en">Website</a>
+  <a href="README.md">简体中文</a> &nbsp;·&nbsp; <b>English</b> &nbsp;·&nbsp; <a href="https://imoneys10k.github.io/money-mom/">Website</a> &nbsp;·&nbsp; <a href="https://pypi.org/project/money-mom/">PyPI</a>
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/money-mom/"><img alt="PyPI" src="https://img.shields.io/pypi/v/money-mom?include_prereleases&label=PyPI&color=C2603B"></a>
   <a href="https://github.com/imoneys10k/money-mom/actions/workflows/test.yml"><img alt="tests" src="https://github.com/imoneys10k/money-mom/actions/workflows/test.yml/badge.svg"></a>
-  <img alt="status: pre-alpha" src="https://img.shields.io/badge/status-pre--alpha-C2603B">
-  <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-2b2b2b">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-2b2b2b">
+  <img alt="zero runtime dependencies" src="https://img.shields.io/badge/runtime%20dependencies-0-2b2b2b">
+  <img alt="data stays local" src="https://img.shields.io/badge/data-local%20only-2b2b2b">
+  <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-2b2b2b">
 </p>
 
 # Money Mom
 
-**Let your AI look after your money like Mom would.**
+**Let your AI look after your money like a mother.**
 
-Money Mom is a **bookkeeping skill** for AI agents (Claude Code, Codex, Cursor, Gemini CLI, ...). You don't open a budgeting app: you say one sentence, or drop in a bank statement, and your AI records, queries and reconciles. The books are plain text files on your own computer. Nothing is uploaded and no company holds your data.
+Money Mom is a **bookkeeping skill** for AI agents (Claude Code, Codex, Cursor, Gemini CLI, ...). You do not open a budgeting app: say one sentence, or drop in a statement file, and your AI records, queries, reconciles and tracks your investments. The ledger is plain text on your own computer: never uploaded, never locked in by any company.
 
-It is not another budgeting app. It makes AI bookkeeping **trustworthy**: the AI only understands what you said, and **a program keeps and checks the books**.
+It is not "yet another budgeting app". It makes AI bookkeeping **trustworthy**: the AI only understands what you said, and **a program keeps and checks the books**.
 
-> **Status: pre-alpha (`0.1.0a7`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a7"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
+> [!NOTE]
+> **Status: pre-alpha (`0.1.0a7`).** The core works and is tested, and it is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a7"`); the npm launcher follows later. Don't keep your only copy of your books in it.
+
+<p align="center">
+  <a href="#one-sentence-install">Install</a> &nbsp;·&nbsp; <a href="#what-it-feels-like">Example</a> &nbsp;·&nbsp; <a href="#why-you-can-trust-it">Why trust it</a> &nbsp;·&nbsp; <a href="#features-in-detail">Features</a> &nbsp;·&nbsp; <a href="#status-and-roadmap">Roadmap</a> &nbsp;·&nbsp; <a href="#documentation">Docs</a>
+</p>
+
+## Highlights
+
+| | | | |
+|---|---|---|---|
+| **Say it, it is booked**<br/>"Lunch 38, Alipay." The AI understands; a program writes it in double-entry and checks it balances. | **Drop a statement, it is imported**<br/>WeChat, Alipay and bank CSV and `.xlsx`; line-by-line reconciliation, sealed only when it matches. | **The same payment is never booked twice**<br/>The program finds duplicates across sources, you decide; a transfer between your accounts becomes one entry. | **Investments too**<br/>Cost lots, first in first out, realised and unrealised gains; reads a TradeGit journal. |
+| **Monthly report and charts**<br/>The conclusion first, then the charts, in a research-note style; shareable with amounts hidden. | **Subscriptions and alerts**<br/>Recurring charges, price rises, double charges, with evidence; it points things out and decides nothing. | **Many currencies**<br/>A currency is never guessed; every rate has a source; HK/US shares and TWD convert. | **Tamper-evident, local-first**<br/>A hash chain finds edits; your data stays on your machine, zero runtime dependencies. |
+
+<p align="center"><img src="assets/charts-en.png" alt="Sample monthly summary: net saved, indicator cards with trends, key points, income and spending trend, spending mix, change on the month before, net worth, income to net" width="860"></p>
+
+*Generated from synthetic demo data.*
 
 ## One-sentence install
 
@@ -80,7 +98,7 @@ flowchart LR
 
 The ledger is a stream of append-only events (open, transaction, confirm, void, balance assertion); balances are derived from it. See the [data model](docs/data-model.md) and the [design notes](docs/design.md) (in Chinese).
 
-## Try the command line
+## Quick start
 
 Needs Python 3.11+. Install from source:
 
@@ -108,7 +126,10 @@ money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
 
-## Statement import and reconciliation
+## Features in detail
+
+<details>
+<summary><b>Statement import and reconciliation</b> · WeChat, Alipay, banks; line by line, sealed only when it matches</summary>
 
 Every bank and wallet exports a different layout, so you describe it once in a **mapping file** and it is applied the same way every time:
 
@@ -130,7 +151,10 @@ money-mom reconcile checking cmb-sep.csv --map cmb --closing-from-statement --as
 - **Ask once, learn once.** Rows no rule matched are held as pending, grouped by payee; one answer becomes a rule and `recheck` settles the waiting history.
 - **Reconciliation finds missing and extra entries, amounts that disagree and charges that may have been taken twice**, and checks the closing balance; only a fully matching result can be sealed. A PDF statement is read by the agent and handed over as JSON; the program itself does not parse PDFs.
 
-## The same payment is never booked twice
+</details>
+
+<details>
+<summary><b>The same payment is never booked twice</b> · duplicates across sources and transfers between your own accounts: the program finds candidates, you decide</summary>
 
 One payment often reaches the books twice: once from a WeChat statement and once from the bank's, or once told to the AI and once in a statement. Importing the same *file* again is already safe; this is about duplicates **between sources**.
 
@@ -146,11 +170,33 @@ money-mom dupes resolve ID1 ID2 --different              # you say "two payments
 - **Transfers between your own accounts** (the bank shows -500 and the wallet shows +500, once on each statement) are found too: opposite amounts, different accounts, and one side names the other account or says transfer, top-up, withdrawal or repayment. If you say "that is one transfer" (`dupes resolve ID1 ID2 --transfer`), both rows are voided and one real transfer takes their place. With no such reason it only asks while one side is still unclassified; rows your own rules already classified are left alone.
 - **Not covered:** repeated rows inside one file (the row hash already handles those).
 
-## Tamper-evident
+</details>
 
-The ledger is append-only text, but anyone can edit a file. So every event carries a hash derived from all events before it; `money-mom verify` (also part of `check` and `doctor`) finds an event that was edited, removed or added by hand. This is **detection**, not prevention: someone who recomputes every later hash is not caught. That is why `verify` prints the chain head: note it somewhere else and a cut-off tail shows up later. It all happens locally, with no network. Events written before this version are covered from the next write on.
+<details>
+<summary><b>Investor pack: holdings, cost and gains</b> · cost lots, holdings, realised and unrealised gains, TradeGit journal import</summary>
 
-## Monthly report and charts
+Buying and selling HK and US shares is recorded in **cost lots**: a purchase creates a lot (units, price paid, date); a sale takes from lots first in first out (or last in first out, or highest cost first), and the cost and the realised gain are written into the entry itself, not estimated afterwards.
+
+```bash
+money-mom invest                                              # once per ledger: opens the gains, dividend, fee and tax accounts
+money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1
+money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR    # records which lots, the cost basis, the realised gain
+money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5
+money-mom holdings --lots                                     # units, average cost, price and its source, value, unrealised gain
+money-mom pnl --year 2026                                     # every sale with the lots it took, plus dividends and fees
+money-mom networth --by-account                               # cash, banks, brokers, debts: each converted, with its share of the assets
+money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run   # read a TradeGit journal (read-only)
+```
+
+- **Prices are never made up.** `holdings` uses, in order, the `--mark` you pass, a price you recorded (`rates set AAPL USD 190 --source ...`), then the last trade price (labelled "not a quote"). A position with no price is listed on its own and the totals are marked partial, **never counted as zero**. The program does not go online for share prices.
+- **Broker statements are imported read-only, but this program does not parse broker files.** IBKR and Schwab exports change, and a parser written without real samples is a guess. [TradeGit](https://github.com/rollingSirius/TradeGit) reads them; Money Mom reads its normalised journal (corrections and voids included). For any other broker, the AI reads the statement and submits JSON rows. Options, short sales, zero-price events (expiries) and adjustments are **never guessed** and are listed row by row; a sale of more shares than the ledger holds stops the whole batch and names the row (usually an opening position is missing: `buy ... --opening`). Re-importing is safe.
+- **TWD and other currencies the ECB does not publish:** `rates update` asks a second source (open.er-api.com) for the latest rate of only those currencies, and names the source on every line; `--no-fallback` turns it off.
+- **Not covered:** short selling, options and futures, stock splits and spin-offs (they change the cost of every earlier lot), average-cost accounting, tax advice.
+
+</details>
+
+<details>
+<summary><b>Monthly report and charts</b> · the conclusion first, then the charts; a research-note style; shareable with amounts hidden</summary>
 
 ```bash
 money-mom report --month 2026-09                    # report: income, spending by category, vs last month, net worth
@@ -159,16 +205,15 @@ money-mom chart spending --format svg --lang en     # a single chart as SVG
 money-mom chart --hide-amounts                      # shares and shapes only, with no amounts, safe to share
 ```
 
-<p align="center"><img src="assets/charts-en.png" alt="Sample monthly summary: net saved, indicator cards with trends, key points, income and spending trend, spending mix, change on the month before, net worth, income to net" width="860"></p>
-
-*Generated from synthetic demo data.*
-
 - **The result first, then the charts:** the page opens with the one number that matters (net saved, and where the income went), then indicator cards with small trend lines and a few plain key points (savings rate, the biggest category, the change on last month, and what to doubt: pending entries, missing rates, an unfinished month), and only then the five charts. On a phone it switches to versions redrawn for a narrow screen, so the text never shrinks to nothing.
 - **The look of a research note:** deep navy and steel grey with a single amber accent, muted red and green for direction, hairline horizontal gridlines only, tabular figures, headlines that state the finding, a source line under every chart and an expandable data table. Spending up is red with ▲ and down is green with ▼, so colour is never the only signal. It follows the system dark mode and prints cleanly.
 - **Charts only draw figures the report already computed.** Conversion follows the same rules; a currency with no rate is marked on the chart, and a month with no data is a gap, never a zero bar.
 - **Just static files:** no script, no web font, no external resource, no network; they open offline. `--format json` gives an agent the figures behind a chart so it can draw its own.
 
-## Subscriptions and anomaly alerts
+</details>
+
+<details>
+<summary><b>Subscriptions and anomaly alerts</b> · recurring charges, price changes, missed and unusually large charges, with evidence</summary>
 
 ```bash
 money-mom alerts                    # this month so far: recurring charges and what is worth a look
@@ -180,7 +225,10 @@ money-mom alerts --month 2026-09
 - **Not enough evidence, no alert.** Less than three months of records, or entries without a payee, are never forced into a subscription or an anomaly; the result says why. Payees are matched exactly after case and spacing are normalised, never fuzzily.
 - **It only points things out.** Nothing is decided for you, nothing is sent, and the network is not used: whether to cancel a subscription, or whether a charge was doubled, is up to you.
 
-## Many currencies
+</details>
+
+<details>
+<summary><b>Many currencies</b> · a currency is never guessed, every rate has a source, conversions can be checked</summary>
 
 You are not tied to one currency:
 
@@ -201,25 +249,15 @@ money-mom balance --account Assets --in CNY  # asset accounts converted, with a 
 
 Every command accepts `--json`; exit codes are 0 success, 1 the ledger refused, 2 usage error. Run `money-mom --help`, or see the [command reference](skills/money-mom/references/commands.md).
 
-## Investor pack: holdings, cost and gains
+</details>
 
-Buying and selling HK and US shares is recorded in **cost lots**: a purchase creates a lot (units, price paid, date); a sale takes from lots first in first out (or last in first out, or highest cost first), and the cost and the realised gain are written into the entry itself, not estimated afterwards.
+<details>
+<summary><b>Tamper-evident</b> · every event carries a hash; it detects edits, it does not prevent them</summary>
 
-```bash
-money-mom invest                                              # once per ledger: opens the gains, dividend, fee and tax accounts
-money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1
-money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR    # records which lots, the cost basis, the realised gain
-money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5
-money-mom holdings --lots                                     # units, average cost, price and its source, value, unrealised gain
-money-mom pnl --year 2026                                     # every sale with the lots it took, plus dividends and fees
-money-mom networth --by-account                               # cash, banks, brokers, debts: each converted, with its share of the assets
-money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run   # read a TradeGit journal (read-only)
-```
+The ledger is append-only text, but anyone can edit a file. So every event carries a hash derived from all events before it; `money-mom verify` (also part of `check` and `doctor`) finds an event that was edited, removed or added by hand. This is **detection**, not prevention: someone who recomputes every later hash is not caught. That is why `verify` prints the chain head: note it somewhere else and a cut-off tail shows up later. It all happens locally, with no network. Events written before this version are covered from the next write on.
 
-- **Prices are never made up.** `holdings` uses, in order, the `--mark` you pass, a price you recorded (`rates set AAPL USD 190 --source ...`), then the last trade price (labelled "not a quote"). A position with no price is listed on its own and the totals are marked partial, **never counted as zero**. The program does not go online for share prices.
-- **Broker statements are imported read-only, but this program does not parse broker files.** IBKR and Schwab exports change, and a parser written without real samples is a guess. [TradeGit](https://github.com/rollingSirius/TradeGit) reads them; Money Mom reads its normalised journal (corrections and voids included). For any other broker, the AI reads the statement and submits JSON rows. Options, short sales, zero-price events (expiries) and adjustments are **never guessed** and are listed row by row; a sale of more shares than the ledger holds stops the whole batch and names the row (usually an opening position is missing: `buy ... --opening`). Re-importing is safe.
-- **TWD and other currencies the ECB does not publish:** `rates update` asks a second source (open.er-api.com) for the latest rate of only those currencies, and names the source on every line; `--no-fallback` turns it off.
-- **Not covered:** short selling, options and futures, stock splits and spin-offs (they change the cost of every earlier lot), average-cost accounting, tax advice.
+</details>
+
 
 ## Compatible AI agents
 
@@ -227,7 +265,7 @@ The skill follows the open [Agent Skills](https://agentskills.io) standard (`SKI
 
 To be straight about it: the installer (`npx skills add`) has been verified in an isolated environment to place the skill where Claude Code, Codex and Gemini CLI read it. **Conversation behaviour has not been tested in every agent yet**; that is on the [roadmap](ROADMAP.md).
 
-## Status
+## Status and roadmap
 
 | | |
 |---|---|
@@ -239,10 +277,14 @@ What it will not do: move money or place orders, store bank credentials, or do m
 
 ## Documentation
 
-- [INSTALL.md](INSTALL.md): install guide for agents
-- [skills/money-mom/SKILL.md](skills/money-mom/SKILL.md): usage guide for agents
-- [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md)
-- [docs/design.md](docs/design.md) (design principles) · [docs/data-model.md](docs/data-model.md) · [docs/agents.md](docs/agents.md) (how each agent loads skills); these three are in Chinese for now
+| Document | What is in it |
+|---|---|
+| [INSTALL.md](INSTALL.md) | The install guide an agent reads (pinned version, SHA-256 verified) |
+| [skills/money-mom/SKILL.md](skills/money-mom/SKILL.md) | The usage guide an agent reads |
+| [Command reference](skills/money-mom/references/commands.md) · [SQL reference](skills/money-mom/references/sql.md) | Every command and flag; the tables and views you can query |
+| [docs/design.md](docs/design.md) · [docs/data-model.md](docs/data-model.md) | Design principles and decisions; the data model (events, lots, the hash chain) |
+| [docs/agents.md](docs/agents.md) | How each agent loads skills |
+| [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md) | The roadmap and the version history |
 
 ## Development
 

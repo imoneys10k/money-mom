@@ -6,25 +6,43 @@
 </p>
 
 <p align="center">
-  <b>简体中文</b> &nbsp;·&nbsp; <a href="README.en.md">English</a> &nbsp;·&nbsp; <a href="https://imoneys10k.github.io/money-mom/">主页</a>
+  <b>简体中文</b> &nbsp;·&nbsp; <a href="README.en.md">English</a> &nbsp;·&nbsp; <a href="https://imoneys10k.github.io/money-mom/">主页</a> &nbsp;·&nbsp; <a href="https://pypi.org/project/money-mom/">PyPI</a>
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/money-mom/"><img alt="PyPI" src="https://img.shields.io/pypi/v/money-mom?include_prereleases&label=PyPI&color=C2603B"></a>
   <a href="https://github.com/imoneys10k/money-mom/actions/workflows/test.yml"><img alt="测试" src="https://github.com/imoneys10k/money-mom/actions/workflows/test.yml/badge.svg"></a>
-  <img alt="状态：pre-alpha" src="https://img.shields.io/badge/状态-pre--alpha-C2603B">
-  <img alt="许可证：MIT" src="https://img.shields.io/badge/许可证-MIT-2b2b2b">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-2b2b2b">
+  <img alt="运行时零依赖" src="https://img.shields.io/badge/运行时依赖-0-2b2b2b">
+  <img alt="数据只在本地" src="https://img.shields.io/badge/数据-仅本地-2b2b2b">
+  <img alt="许可证：MIT" src="https://img.shields.io/badge/许可证-MIT-2b2b2b">
 </p>
 
 # Money Mom
 
 **让 AI 像妈妈一样帮你管钱。**
 
-Money Mom 是一个装进 AI agent（Claude Code、Codex、Cursor、Gemini CLI……）的**记账能力**。你不用打开记账 App：说一句话，或丢一个账单文件，AI 帮你记账、查账、对账。账本是你自己电脑上的纯文本文件，不上传，不被任何公司锁住。
+Money Mom 是装进 AI agent（Claude Code、Codex、Cursor、Gemini CLI……）的**记账能力**。你不用打开记账 App：说一句话，或丢一个账单文件，AI 帮你记账、查账、对账、管投资。账本是你自己电脑上的纯文本文件，不上传，不被任何公司锁住。
 
-它做的不是“又一个记账软件”，而是让 AI 记账这件事**值得信任**：AI 只负责听懂你的话，**账由程序来记、来校验**。
+它要解决的不是“又一个记账软件”，而是让 AI 记账**值得信任**：AI 只负责听懂你的话，**账由程序来记、来校验**。
 
-> **状态：pre-alpha（`0.1.0a7`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a7"`），npm 启动器稍后发布，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
+> [!NOTE]
+> **状态：pre-alpha（`0.1.0a7`）。** 核心功能已经可用，都有测试，并已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a7"`）；npm 启动器稍后发布。不要把唯一的账放在它上面。
+
+<p align="center">
+  <a href="#一句话安装">安装</a> &nbsp;·&nbsp; <a href="#用起来是这样">示例</a> &nbsp;·&nbsp; <a href="#为什么可信">为什么可信</a> &nbsp;·&nbsp; <a href="#功能详解">功能</a> &nbsp;·&nbsp; <a href="#状态与路线图">路线图</a> &nbsp;·&nbsp; <a href="#文档">文档</a>
+</p>
+
+## 亮点
+
+| | | | |
+|---|---|---|---|
+| **说一句话就记账**<br/>“午饭 38，支付宝”。AI 听懂，程序按复式记账写入并校验平衡。 | **账单一丢就导入**<br/>微信、支付宝、银行的 CSV 与 `.xlsx`；逐笔对账，对上了才封存。 | **同一笔钱不记两次**<br/>跨来源的重复由程序找、由你判断；自己账户间的转账合成一笔。 | **投资也能管**<br/>成本批次、先进先出、已实现与浮动盈亏；读取 TradeGit 日志。 |
+| **月报与图表**<br/>先给结论再给图，投研报告风格，可隐藏金额后分享。 | **订阅与异常提醒**<br/>周期扣款、涨价、重复扣款，附证据，只提醒不替你决定。 | **多币种**<br/>币种从不靠猜；汇率带来源；港美股、台币都能折算。 | **防篡改，本地优先**<br/>哈希链找出改动；数据在你电脑上，运行时零依赖。 |
+
+<p align="center"><img src="assets/charts-zh.png" alt="月度财务简报示例：本月结余、指标卡与走势、要点、收支趋势、支出构成、环比变化、净资产、从收入到结余" width="860"></p>
+
+*上图用合成的演示数据生成。*
 
 ## 一句话安装
 
@@ -80,7 +98,7 @@ flowchart LR
 
 账本是一串只追加的事件（开户、交易、确认、作废、余额断言）；当前余额由事件推导。详见 [数据模型](docs/data-model.md) 和 [设计原则](docs/design.md)。
 
-## 命令行试用
+## 快速开始
 
 需要 Python 3.11+。从源码安装：
 
@@ -108,7 +126,10 @@ money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # 自检
 ```
 
-## 账单导入与对账
+## 功能详解
+
+<details>
+<summary><b>账单导入与对账</b> · 微信、支付宝、银行；逐笔对账，对上了才封存</summary>
 
 每家银行、每个钱包的导出文件格式都不一样，所以先用一份**映射文件**描述一次，之后每次都按同样的方式处理：
 
@@ -130,7 +151,10 @@ money-mom reconcile 银行卡 招行9月.csv --map cmb --closing-from-statement 
 - **问一次，学一次。** 没有规则命中的行记为待确认，并按对方分组；回答一次写成规则，`recheck` 把等着的历史行一并补全。
 - **对账找出漏记、多记、金额不符，以及可能被扣了两次的款项**，并核对期末余额；只有完全对上才允许封存。PDF 账单由 agent 读取后以 JSON 提交，程序本身不解析 PDF。
 
-## 同一笔钱不记两次
+</details>
+
+<details>
+<summary><b>同一笔钱不记两次</b> · 跨来源重复与自己账户间的转账，候选由程序找、判断由你做</summary>
 
 同一笔支付常常会从两个地方进账本：微信账单和银行账单各一次，或者你先对 AI 说了一次、账单里又来一次。同一份文件重复导入早就会被跳过；这里处理的是**不同来源**之间的重复。
 
@@ -146,11 +170,33 @@ money-mom dupes resolve ID1 ID2 --different              # 你说“是两笔”
 - **你自己账户之间的转账**（银行扣了 500、微信到账 500，两份账单各出现一次）也会被找出来：两边金额相反、账户不同，一边点名了另一边的账户或带“转账/充值/提现/还款”字样，就列为候选。你说“是同一笔转账”，两行都被作废，换成一笔真正的转账（`dupes resolve ID1 ID2 --transfer`）；没有任何理由时，只有一边还没分类才会问，已经被你的规则分好类的不打扰你。
 - **不覆盖：** 同一份文件内的重复行（本来就由行哈希处理）。
 
-## 防篡改
+</details>
 
-账本是只追加的文本文件，但文件本身谁都能改。所以每个事件都带一个哈希，由它之前的所有事件推出来；`money-mom verify`（也包含在 `check` 和 `doctor` 里）会找出被改过、被删掉、被手工塞入的事件。这是**发现**篡改，不是阻止：如果有人重算了之后所有的哈希，它发现不了——所以 `verify` 会打印链头，你可以把它记在别处，以后对照，就能发现末尾被截掉的部分。全部在本地完成，不联网。升级前写下的旧事件，从下一次写入起被覆盖。
+<details>
+<summary><b>投资者包：持仓、成本与盈亏</b> · 成本批次、持仓、已实现与浮动盈亏、读取 TradeGit 日志</summary>
 
-## 月报与图表
+港股、美股的买卖按**成本批次**记：买入建立一个批次（份额、买入价、日期），卖出按先进先出（也可选后进先出、最高成本先出）从批次里拿，成本和已实现盈亏直接写进那一笔账里，不事后估算。
+
+```bash
+money-mom invest                                              # 每个账本一次：开设盈亏、股息、手续费、税的账户
+money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1
+money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR    # 记下用了哪几批、成本、已实现盈亏
+money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5
+money-mom holdings --lots                                     # 份额、平均成本、价格及其来源、市值、浮动盈亏
+money-mom pnl --year 2026                                     # 每笔卖出用了哪些批次，加股息与手续费
+money-mom networth --by-account                               # 现金、银行、券商、负债，逐个账户折算，各占资产多少
+money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run   # 读取 TradeGit 日志（只读）
+```
+
+- **价格从不编造。** `holdings` 依次用你给的 `--mark`、你记下的价格（`rates set AAPL USD 190 --source ...`）、最后一笔成交价（并标明“不是行情”）；没有价格的持仓单独列出，总数标为不完整，**不会当作零**。程序不联网取股价。
+- **券商流水只读导入，但不自己解析券商文件。** IBKR、嘉信的导出格式会变，没有真实样本的解析器就是猜；这些由 [TradeGit](https://github.com/rollingSirius/TradeGit) 读取，Money Mom 读取它规范化后的日志（含更正与作废）。其他券商，让 AI 读账单后以 JSON 行提交。期权、卖空、零价事件（如到期）、调整等**不会被猜**，逐条列出；卖出超过账本里的持仓会让整批停下并指出哪一行（通常缺一个期初持仓：`buy ... --opening`）。重复导入是安全的。
+- **台币等欧洲央行没有的币种**：`rates update` 会向第二个来源（open.er-api.com）只询问这些币种的最新汇率，输出里逐条标明来源；`--no-fallback` 可关闭。
+- **不覆盖：** 卖空、期权与期货、拆股与分拆（会改变此前所有批次的成本）、平均成本法、税务建议。
+
+</details>
+
+<details>
+<summary><b>月报与图表</b> · 先给结论，再给图；投研报告风格；可隐藏金额分享</summary>
 
 ```bash
 money-mom report --month 2026-09                    # 月报：收支、分类、和上月对比、净资产变化
@@ -159,16 +205,15 @@ money-mom chart spending --format svg --lang en     # 单张图，SVG
 money-mom chart --hide-amounts                      # 只画比例与形状，没有任何金额，可以放心分享
 ```
 
-<p align="center"><img src="assets/charts-zh.png" alt="月度财务简报示例：本月结余、指标卡与走势、要点、收支趋势、支出构成、环比变化、净资产、从收入到结余" width="860"></p>
-
-*上图用合成的演示数据生成。*
-
 - **先给结论，再给图：** 页面从最重要的一个数字（本月结余，以及收入花在哪里）开始，接着是带迷你走势的指标卡和几条直接读出来的要点（结余与储蓄率、最大的分类、较上月的变化，以及哪些数字要打折扣：待确认、缺汇率、本月未结束），然后才是五张图。手机上打开会换成专门为窄屏重画的版本，文字不会缩成看不清。
 - **风格取自投研报告：** 深海军蓝配钢蓝灰，只用一个琥珀色强调，涨跌用沉稳的红绿；只画水平细网格，等宽数字；标题直接写结论，每张图下有来源，并附可展开的数据表。支出增加用红色加 ▲，减少用绿色加 ▼，不只靠颜色区分。自动跟随系统深色模式，也能直接打印。
 - **图只画月报已经算好的数字。** 折算规则与月报完全一致；缺汇率的币种明确标注，没有数据的月份是空缺，不画成 0。
 - **只是几个静态文件：** 不含脚本、不加载字体或任何外部资源、不联网，离线也能打开。`--format json` 给 agent 图背后的数字，让它自己画。
 
-## 订阅与异常提醒
+</details>
+
+<details>
+<summary><b>订阅与异常提醒</b> · 周期扣款、涨价、该扣没扣、异常大额，附证据</summary>
 
 ```bash
 money-mom alerts                    # 本月至今：周期扣款（订阅）和值得看一眼的事
@@ -180,7 +225,10 @@ money-mom alerts --month 2026-09
 - **证据不够就不说话。** 不满三个月的记录、没有填对方的记录都不会被硬判成订阅或异常，并明确提示原因。对方名称只做大小写和空格归一后的精确匹配，不做模糊猜测。
 - **只提醒，不替你做决定**，也不联网、不发通知；是否取消订阅、是不是重复扣款，由你来定。
 
-## 多币种
+</details>
+
+<details>
+<summary><b>多币种</b> · 币种从不靠猜，汇率带来源，折算可复核</summary>
 
 不必固定一个币种：
 
@@ -201,25 +249,15 @@ money-mom balance --account Assets --in CNY  # 资产账户逐个折算并合计
 
 每个命令都支持 `--json`，退出码 0 成功、1 账本拒绝、2 用法错误。完整命令见 `money-mom --help` 或 [命令参考](skills/money-mom/references/commands.md)。
 
-## 投资者包：持仓、成本与盈亏
+</details>
 
-港股、美股的买卖按**成本批次**记：买入建立一个批次（份额、买入价、日期），卖出按先进先出（也可选后进先出、最高成本先出）从批次里拿，成本和已实现盈亏直接写进那一笔账里，不事后估算。
+<details>
+<summary><b>防篡改</b> · 每个事件带哈希；发现改动，而不是阻止</summary>
 
-```bash
-money-mom invest                                              # 每个账本一次：开设盈亏、股息、手续费、税的账户
-money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1
-money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR    # 记下用了哪几批、成本、已实现盈亏
-money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5
-money-mom holdings --lots                                     # 份额、平均成本、价格及其来源、市值、浮动盈亏
-money-mom pnl --year 2026                                     # 每笔卖出用了哪些批次，加股息与手续费
-money-mom networth --by-account                               # 现金、银行、券商、负债，逐个账户折算，各占资产多少
-money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run   # 读取 TradeGit 日志（只读）
-```
+账本是只追加的文本文件，但文件本身谁都能改。所以每个事件都带一个哈希，由它之前的所有事件推出来；`money-mom verify`（也包含在 `check` 和 `doctor` 里）会找出被改过、被删掉、被手工塞入的事件。这是**发现**篡改，不是阻止：如果有人重算了之后所有的哈希，它发现不了——所以 `verify` 会打印链头，你可以把它记在别处，以后对照，就能发现末尾被截掉的部分。全部在本地完成，不联网。升级前写下的旧事件，从下一次写入起被覆盖。
 
-- **价格从不编造。** `holdings` 依次用你给的 `--mark`、你记下的价格（`rates set AAPL USD 190 --source ...`）、最后一笔成交价（并标明“不是行情”）；没有价格的持仓单独列出，总数标为不完整，**不会当作零**。程序不联网取股价。
-- **券商流水只读导入，但不自己解析券商文件。** IBKR、嘉信的导出格式会变，没有真实样本的解析器就是猜；这些由 [TradeGit](https://github.com/rollingSirius/TradeGit) 读取，Money Mom 读取它规范化后的日志（含更正与作废）。其他券商，让 AI 读账单后以 JSON 行提交。期权、卖空、零价事件（如到期）、调整等**不会被猜**，逐条列出；卖出超过账本里的持仓会让整批停下并指出哪一行（通常缺一个期初持仓：`buy ... --opening`）。重复导入是安全的。
-- **台币等欧洲央行没有的币种**：`rates update` 会向第二个来源（open.er-api.com）只询问这些币种的最新汇率，输出里逐条标明来源；`--no-fallback` 可关闭。
-- **不覆盖：** 卖空、期权与期货、拆股与分拆（会改变此前所有批次的成本）、平均成本法、税务建议。
+</details>
+
 
 ## 兼容的 AI agent
 
@@ -227,7 +265,7 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 诚实地说：安装器（`npx skills add`）已在隔离环境里验证过会把 skill 放到 Claude Code、Codex、Gemini CLI 读取的目录；**还没有在每个 agent 里逐一实测对话效果**，这一项在[路线图](ROADMAP.md)里。
 
-## 当前状态
+## 状态与路线图
 
 | | |
 |---|---|
@@ -239,10 +277,14 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 ## 文档
 
-- [INSTALL.md](INSTALL.md)：给 agent 读的安装说明
-- [skills/money-mom/SKILL.md](skills/money-mom/SKILL.md)：给 agent 读的使用说明
-- [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md)
-- [docs/design.md](docs/design.md)：设计原则与已做的决定 · [docs/data-model.md](docs/data-model.md)：数据模型 · [docs/agents.md](docs/agents.md)：各 agent 的加载方式调研
+| 文档 | 内容 |
+|---|---|
+| [INSTALL.md](INSTALL.md) | 给 agent 读的安装说明（锁定版本，校验 SHA-256） |
+| [skills/money-mom/SKILL.md](skills/money-mom/SKILL.md) | 给 agent 读的使用说明 |
+| [命令参考](skills/money-mom/references/commands.md) · [SQL 参考](skills/money-mom/references/sql.md) | 每个命令与参数；可直接查账的表和视图 |
+| [docs/design.md](docs/design.md) · [docs/data-model.md](docs/data-model.md) | 设计原则与已做的决定；数据模型（事件、批次、哈希链） |
+| [docs/agents.md](docs/agents.md) | 各 agent 的 skill 加载方式调研 |
+| [ROADMAP.md](ROADMAP.md) · [CHANGELOG.md](CHANGELOG.md) | 路线图与版本记录 |
 
 ## 开发
 
