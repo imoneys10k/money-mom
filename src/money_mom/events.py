@@ -16,7 +16,7 @@ from typing import Any
 from .errors import ValidationError
 
 SCHEMA_VERSION = 1
-KINDS = ("open", "close", "txn", "confirm", "void", "assert")
+KINDS = ("open", "close", "txn", "confirm", "void", "assert", "price")
 ROOTS = ("Assets", "Liabilities", "Equity", "Income", "Expenses")
 ACTOR_TYPES = ("human", "agent")
 SOURCE_TYPES = ("chat", "file", "screenshot", "import", "manual")
@@ -31,6 +31,7 @@ _KIND_REQUIRED = {
     "confirm": frozenset({"target"}),
     "void": frozenset({"target", "reason"}),
     "assert": frozenset({"date", "account", "amount", "ccy"}),
+    "price": frozenset({"date", "base", "quote", "rate"}),
 }
 _KIND_OPTIONAL = {
     "open": frozenset({"currencies"}),
@@ -39,6 +40,7 @@ _KIND_OPTIONAL = {
     "confirm": frozenset({"postings"}),
     "void": frozenset(),
     "assert": frozenset(),
+    "price": frozenset(),
 }
 
 _ID_RE = re.compile(r"[0-9A-Za-z_-]{1,64}")
@@ -114,6 +116,16 @@ class Assert(Event):
     account: str
     amount: Decimal
     ccy: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class Price(Event):
+    """One unit of `base` is worth `rate` units of `quote` on `date`, according to `source`."""
+
+    date: _dt.date
+    base: str
+    quote: str
+    rate: Decimal
 
 
 def check_account_name(name: Any, field: str = "account") -> str:
@@ -356,6 +368,20 @@ def _parse(obj: Any) -> Event:
         if not isinstance(reason, str) or not reason.strip():
             raise _bad("void requires a non-empty reason", "invalid_field")
         return Void(**common, target=_parse_id(obj["target"], "target"), reason=reason)
+    if kind == "price":
+        if common["source"] is None:
+            raise _bad(
+                "a price must carry a source (where the rate came from), for example "
+                '{"type": "import", "ref": "api.frankfurter.dev"}',
+                "missing_field",
+            )
+        base, quote = check_currency(obj["base"], "base"), check_currency(obj["quote"], "quote")
+        if base == quote:
+            raise _bad("base and quote must be different currencies", "invalid_price")
+        rate = parse_amount(obj["rate"], "rate")
+        if rate <= 0:
+            raise _bad("rate must be greater than zero", "invalid_price")
+        return Price(**common, date=parse_date(obj["date"]), base=base, quote=quote, rate=rate)
     return Assert(
         **common,
         date=parse_date(obj["date"]),

@@ -22,7 +22,7 @@ from .errors import LedgerError
 from .state import LedgerState
 
 CACHE_NAME = "cache.sqlite"
-CACHE_LAYOUT = 1
+CACHE_LAYOUT = 2
 
 SCHEMA_SQL = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -52,6 +52,11 @@ CREATE TABLE assertions (
   voided_by TEXT
 );
 
+CREATE TABLE prices (
+  id TEXT PRIMARY KEY, date TEXT NOT NULL, base TEXT NOT NULL, quote TEXT NOT NULL,
+  rate_text TEXT NOT NULL, rate REAL NOT NULL, source_type TEXT, source_ref TEXT, recorded_at TEXT NOT NULL
+);
+
 CREATE TABLE events (
   seq INTEGER PRIMARY KEY, id TEXT NOT NULL, kind TEXT NOT NULL, ts TEXT NOT NULL,
   actor_type TEXT NOT NULL, actor_name TEXT NOT NULL, target TEXT
@@ -76,6 +81,11 @@ CREATE VIEW v_pending AS
 
 CREATE VIEW v_balances AS
   SELECT account, ccy, SUM(amount) AS amount FROM v_postings GROUP BY account, ccy;
+
+CREATE VIEW v_rates AS
+  SELECT p.base, p.quote, p.date, p.rate_text, p.rate, p.source_ref
+  FROM prices p
+  WHERE p.date = (SELECT MAX(q.date) FROM prices q WHERE q.base = p.base AND q.quote = p.quote);
 
 CREATE VIEW v_monthly AS
   SELECT substr(date, 1, 7) AS month, account, ccy, SUM(amount) AS amount
@@ -139,6 +149,18 @@ def _build(conn: sqlite3.Connection, state: LedgerState, fp: str) -> None:
                 format(r.event.amount, "f"), float(r.event.amount), r.event.ccy, r.void_event_id,
             )
             for r in state.assertions.values()
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO prices VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                r.event.id, r.event.date.isoformat(), r.event.base, r.event.quote,
+                format(r.event.rate, "f"), float(r.event.rate),
+                (r.event.source or {}).get("type"), (r.event.source or {}).get("ref"), r.event.ts.isoformat(),
+            )
+            for by_date in state.effective_prices().values()
+            for r in by_date.values()
         ],
     )
     conn.executemany(

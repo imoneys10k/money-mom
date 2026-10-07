@@ -25,6 +25,7 @@ from .errors import LedgerError
 from .events import ROOTS
 from .intents import SPECS, postings_with_slots, record_intent, resolve_account
 from .ledger import TONES, Ledger
+from .rates import convert_balances, fetch_frankfurter, update_rates
 from .templates import TEMPLATES, apply_template
 
 DEFAULT_HOME = "~/MoneyMom"
@@ -386,9 +387,35 @@ def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
     return data, head + ("\n" + body if body else "")
 
 
+def _converted_text(result: dict[str, Any]) -> str:
+    rows = [
+        [r["account"], r["amount"], r["ccy"], r["converted"] if r["converted"] is not None else "no rate",
+         f"{r['rate']} ({r['rate_date']}{', STALE' if r['stale'] else ''})" if r["rate"] and r["via"] != "identity" else ""]
+        for r in result["balances"]
+    ]
+    text = _table(["account", "amount", "ccy", f"in {result['in']}", "rate"], rows) if rows else "No balances."
+    text += f"\nTotal in {result['in']}: {result['total']}" + (" (PARTIAL)" if result["partial"] else "")
+    if result["missing"]:
+        text += f"\n  No rate for {', '.join(result['missing'])}: left out of the total. Run `money-mom rates update`."
+    if result["stale"]:
+        text += f"\n  Rates for {', '.join(result['stale'])} are more than 7 days old."
+    return text
+
+
 def cmd_balance(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     as_of = dt.date.fromisoformat(args.as_of) if args.as_of else None
+    if args.target_ccy:
+        target = parse_currency(args.target_ccy)
+        if len(target) != 1:
+            raise UsageError(f"--in needs one currency, such as CNY or 人民币; got {args.target_ccy!r}")
+        prefix = args.account
+        kept = {
+            key: amount for key, amount in ledger.state.balances(as_of).items()
+            if (not prefix or key[0] == prefix or key[0].startswith(prefix + ":")) and (amount != 0 or args.all)
+        }
+        result = convert_balances(ledger.state, kept, target[0], as_of or dt.date.today(), pivot=ledger.base_currency)
+        return result, _converted_text(result)
     prefix = args.account
     rows = []
     for (account, ccy), amount in sorted(ledger.state.balances(as_of).items()):
@@ -399,6 +426,86 @@ def cmd_balance(args: argparse.Namespace) -> tuple[Any, str]:
         rows.append({"account": account, "ccy": ccy, "amount": _fmt(amount)})
     text = _table(["account", "amount", "ccy"], [[r["account"], r["amount"], r["ccy"]] for r in rows]) if rows else "No balances."
     return {"as_of": args.as_of, "balances": rows}, text
+
+
+def cmd_networth(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    as_of = dt.date.fromisoformat(args.as_of) if args.as_of else None
+    target = parse_currency(args.target_ccy) if args.target_ccy else (ledger.base_currency,)
+    if len(target) != 1:
+        raise UsageError(f"--in needs one currency, such as CNY or 人民币; got {args.target_ccy!r}")
+    totals: dict[str, Decimal] = {}
+    for (account, ccy), amount in ledger.state.balances(as_of).items():
+        if account.split(":", 1)[0] in ("Assets", "Liabilities"):
+            totals[ccy] = totals.get(ccy, Decimal(0)) + amount
+    result = convert_balances(
+        ledger.state, {("net worth", c): a for c, a in totals.items()}, target[0],
+        as_of or dt.date.today(), pivot=ledger.base_currency,
+    )
+    result["by_currency"] = {c: format(a, "f") for c, a in sorted(totals.items())}
+    rows = [
+        [r["ccy"], r["amount"], r["converted"] if r["converted"] is not None else "no rate",
+         f"{r['rate']} ({r['rate_date']}{', STALE' if r['stale'] else ''})" if r["rate"] and r["via"] != "identity" else ""]
+        for r in result["balances"]
+    ]
+    text = f"Net worth (assets minus liabilities), in {result['in']}\n" + (
+        _table(["ccy", "amount", f"in {result['in']}", "rate"], rows) if rows else "No balances."
+    )
+    text += f"\nTotal: {result['total']} {result['in']}" + (" (PARTIAL)" if result["partial"] else "")
+    if result["missing"]:
+        text += f"\n  No rate for {', '.join(result['missing'])}: left out. Run `money-mom rates update`."
+    return result, text
+
+
+def cmd_rates(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    if args.rates_command == "update":
+        on = dt.date.fromisoformat(args.date) if args.date else None
+        data = update_rates(
+            ledger, on=on, currencies=args.currency, fetch=fetch_frankfurter,
+            actor=_actor(args), dry_run=args.dry_run,
+        )
+        if not data["checked"]:
+            return data, f"No currency other than {data['base_currency']} in your ledger yet, so there is nothing to fetch."
+        lines = [("Would record" if args.dry_run else "Recorded") + f" {len(data['recorded'])} rate(s) from {data['source']}:"]
+        lines += [f"  1 {r['base']} = {r['rate']} {r['quote']}  ({r['date']})" for r in data["recorded"]]
+        if data["unchanged"]:
+            lines.append(f"{len(data['unchanged'])} already up to date.")
+        if data["unsupported"]:
+            lines.append(
+                f"Not covered by the source: {', '.join(data['unsupported'])}. Record one yourself: "
+                f"`money-mom rates set {data['unsupported'][0]} {data['base_currency']} RATE --source \"where it came from\"`."
+            )
+        lines.append("Rates are daily reference prices, not live market quotes.")
+        return data, "\n".join(lines)
+    if args.rates_command == "set":
+        base, quote = parse_currency(args.base), parse_currency(args.quote)
+        if len(base) != 1 or len(quote) != 1:
+            raise UsageError("give each currency as one code or word, such as USD or 美元")
+        actor = _actor(args)
+        ev = ledger.append(
+            ledger.new_event(
+                "price", actor=actor, date=args.date or _today(), base=base[0], quote=quote[0], rate=args.rate,
+                source={"type": "chat" if actor[0] == "agent" else "manual", "ref": args.source},
+            ),
+            clamp_ts=True,
+        )
+        return (
+            {"id": ev.id, "base": base[0], "quote": quote[0], "rate": args.rate, "date": ev.date.isoformat()},
+            f"1 {base[0]} = {args.rate} {quote[0]} on {ev.date.isoformat()} ({args.source})",
+        )
+    rows = []
+    for (base, quote), by_date in sorted(ledger.state.effective_prices().items()):
+        if args.base and parse_currency(args.base) != (base,) or args.quote and parse_currency(args.quote) != (quote,):
+            continue
+        day = max(by_date)
+        rec = by_date[day]
+        rows.append({
+            "base": base, "quote": quote, "date": day.isoformat(), "rate": format(rec.event.rate, "f"),
+            "source": (rec.event.source or {}).get("ref"), "age_days": (dt.date.today() - day).days,
+        })
+    text = _table(["from", "to", "date", "rate", "source"], [[r["base"], r["quote"], r["date"], r["rate"], r["source"]] for r in rows]) if rows else "No rates recorded yet. Run `money-mom rates update`."
+    return rows, text
 
 
 def cmd_pending(args: argparse.Namespace) -> tuple[Any, str]:
@@ -592,6 +699,27 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--account", help="only this account and its children")
     p.add_argument("--as-of", metavar="DATE")
     p.add_argument("--all", action="store_true", help="include zero balances")
+    p.add_argument("--in", dest="target_ccy", metavar="CCY", help="also express every balance in this currency, using stored rates")
+
+    p = command("networth", cmd_networth, "assets minus liabilities, per currency and as one total in --in (default: the base currency)")
+    p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the total (default: the ledger's base currency)")
+    p.add_argument("--as-of", metavar="DATE")
+
+    p = command("rates", cmd_rates, "exchange rates: fetch (the only command that uses the network), set, list")
+    rates_sub = p.add_subparsers(dest="rates_command", required=True, metavar="ACTION")
+    q = rates_sub.add_parser("update", parents=[common], help="fetch rates into the base currency from the ECB reference rates (needs the network)")
+    q.add_argument("--currency", action="append", help="only this currency (repeatable); default: every foreign currency in the ledger")
+    q.add_argument("--date", help="YYYY-MM-DD: the rate for that day (default: the latest)")
+    q.add_argument("--dry-run", action="store_true", help="fetch and show, write nothing")
+    q = rates_sub.add_parser("set", parents=[common], help="record a rate yourself: 1 BASE = RATE QUOTE")
+    q.add_argument("base")
+    q.add_argument("quote")
+    q.add_argument("rate", help="a positive decimal, such as 7.2345")
+    q.add_argument("--source", required=True, help="where the rate came from, for example \"bank app 2026-10-07\"")
+    q.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    q = rates_sub.add_parser("list", parents=[common], help="the latest stored rate for each pair")
+    q.add_argument("--base")
+    q.add_argument("--quote")
 
     command("pending", cmd_pending, "list transactions waiting for confirmation")
     command("accounts", cmd_accounts, "list accounts")

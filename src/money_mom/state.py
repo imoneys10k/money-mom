@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .errors import RuleError
-from .events import Assert, Close, Confirm, Event, Open, Posting, Txn, Void
+from .events import Assert, Close, Confirm, Event, Open, Posting, Price, Txn, Void
 
 
 @dataclass
@@ -50,6 +50,16 @@ class AssertRecord:
         return self.void_event_id is not None
 
 
+@dataclass
+class PriceRecord:
+    event: Price
+    void_event_id: str | None = None
+
+    @property
+    def voided(self) -> bool:
+        return self.void_event_id is not None
+
+
 @dataclass(frozen=True)
 class Problem:
     code: str
@@ -62,6 +72,7 @@ class LedgerState:
     accounts: dict[str, AccountInfo] = field(default_factory=dict)
     txns: dict[str, TxnRecord] = field(default_factory=dict)
     assertions: dict[str, AssertRecord] = field(default_factory=dict)
+    prices: dict[str, PriceRecord] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     _ids: set[str] = field(default_factory=set)
     _last_ts: _dt.datetime | None = None
@@ -107,6 +118,14 @@ class LedgerState:
         used = {p.ccy for rec in self.txns.values() for p in rec.postings}
         used |= {c for info in self.accounts.values() for c in (info.currencies or ())}
         return used
+
+    def effective_prices(self) -> dict[tuple[str, str], dict[_dt.date, PriceRecord]]:
+        """Live rates per (base, quote) and date. A later price for the same day replaces an earlier one."""
+        table: dict[tuple[str, str], dict[_dt.date, PriceRecord]] = {}
+        for rec in self.prices.values():  # insertion order is event order
+            if not rec.voided:
+                table.setdefault((rec.event.base, rec.event.quote), {})[rec.event.date] = rec
+        return table
 
     def pending(self) -> list[TxnRecord]:
         return [r for r in self.txns.values() if r.status == "pending"]
@@ -312,11 +331,20 @@ class LedgerState:
                 raise RuleError(f"{ev.target} is already voided", code="already_voided")
             arec.void_event_id = ev.id
             return
+        prec = self.prices.get(ev.target)
+        if prec is not None:
+            if prec.voided:
+                raise RuleError(f"{ev.target} is already voided", code="already_voided")
+            prec.void_event_id = ev.id
+            return
         raise RuleError(
-            f"no transaction or assertion with id {ev.target!r}",
+            f"no transaction, assertion or price with id {ev.target!r}",
             code="unknown_target",
             details={"target": ev.target},
         )
+
+    def _apply_price(self, ev: Price) -> None:
+        self.prices[ev.id] = PriceRecord(ev)
 
     def _apply_assert(self, ev: Assert) -> None:
         self._known_account(ev.account)

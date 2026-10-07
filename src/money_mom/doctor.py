@@ -80,6 +80,8 @@ def run_doctor(root: Path) -> dict[str, Any]:
         check("cache", False, str(err))
 
     last = state.events[-1].ts.isoformat() if state.events else None
+    prices = state.effective_prices()
+    latest_rate = max((d for by_date in prices.values() for d in by_date), default=None)
     result["ledger"] = {
         "base_currency": ledger.base_currency,
         "tone": ledger.config.get("tone", "normal"),
@@ -90,6 +92,7 @@ def run_doctor(root: Path) -> dict[str, Any]:
         "pending": len(state.pending()),
         "aliases": len(ledger.aliases()),
         "currencies": sorted(state.currencies_in_use() | {ledger.base_currency}),
+        "rates": {"pairs": len(prices), "latest": latest_rate.isoformat() if latest_rate else None},
         "last_event_at": last,
     }
     result["ok"] = all(c["ok"] for c in checks)

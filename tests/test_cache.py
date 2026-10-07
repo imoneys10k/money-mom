@@ -4,7 +4,7 @@ import time
 import unittest
 
 from money_mom import Ledger, LedgerError
-from money_mom.cache import CACHE_NAME, open_cache, run_query
+from money_mom.cache import CACHE_LAYOUT, CACHE_NAME, open_cache, run_query
 
 from helpers import AGENT, LedgerTestCase
 
@@ -120,7 +120,7 @@ class Freshness(CacheTestCase):
         raw.execute("UPDATE meta SET value = '0' WHERE key = 'layout'")
         raw.commit()
         raw.close()
-        self.assertEqual(self.rows("SELECT value FROM meta WHERE key = 'layout'"), [["1"]])
+        self.assertEqual(self.rows("SELECT value FROM meta WHERE key = 'layout'"), [[str(CACHE_LAYOUT)]])
 
     def test_deleting_the_cache_loses_nothing(self):
         self.query("SELECT 1")
