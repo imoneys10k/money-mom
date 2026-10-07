@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+
+# 真实账本永远不进仓库
+/ledger/
+*.sqlite
+*.sqlite3
+*.db
