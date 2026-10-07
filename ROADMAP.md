@@ -15,13 +15,13 @@
 
 ## M1 · v0.1 内核与“记一笔”
 
-- [ ] 账户、分录、币种与高精度金额、借贷平衡校验
-- [ ] 事件流存储：只追加、按月分文件、`void` 冲销
+- [x] 账户、分录、币种与高精度金额、借贷平衡校验（`src/money_mom/`，82 个测试）
+- [x] 事件流存储：只追加、按月分文件、`void` 冲销、跨进程文件锁、整批全有或全无
 - [ ] SQLite 缓存：由事件流重建，供 SQL 查询
 - [ ] CLI：`init` / `add` / `check` / `query` / `void`
 - [ ] 结构化意图（spend / income / transfer）→ 分录渲染
-- [ ] propose → validate → commit 流程；待确认区与 `!` 状态
-- [ ] 余额断言（balance assert）
+- [ ] propose → validate → commit 流程；待确认区与 `!` 状态（内核已支持 pending / confirm，意图层与待确认区命令待做）
+- [x] 余额断言与锁定（含人工覆盖、agent 不可覆盖）
 - [ ] 账户树模板（中文，国内起步）
 - [ ] 导出 Beancount，并以 `bean-check` 做差分测试（开发期依赖，非运行时依赖）
 - [ ] `SKILL.md` 与 agent 指令文件
@@ -42,7 +42,8 @@
 - [ ] Claude Code 插件市场入口（`.claude-plugin/marketplace.json`）
 - [ ] 逐个 agent 实测：Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot
 - [ ] 为不支持 skill 的 agent 提供 `AGENTS.md` 兜底说明
-- [ ] GitHub Actions：测试、打包、发布
+- [x] GitHub Actions：Linux / macOS / Windows × Python 3.11–3.13 的测试
+- [ ] GitHub Actions：打包与发布
 - [ ] Release 流程：语义化版本、CHANGELOG、Release notes
 - [ ] 项目主页（GitHub Pages）
 

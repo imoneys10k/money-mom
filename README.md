@@ -3,7 +3,7 @@
 **让 AI 像妈妈一样帮你管钱。**
 *Let your AI look after your money like Mom would.*
 
-> 状态：**立项阶段（pre-alpha）**。目前还没有可安装的版本，下面的用法是目标形态，进度见 [ROADMAP.md](ROADMAP.md)。
+> 状态：**pre-alpha**。目前只有账本内核（Python 库，已测试），**还没有命令行、skill 和可安装的版本**，下面的用法是目标形态，进度见 [ROADMAP.md](ROADMAP.md)。
 
 Money Mom 是一个装进 AI agent（Claude Code、Codex 等）的**记账能力**。你不用打开记账 App：说一句话或丢一个文件，AI 帮你记账、查账、对账；账本是你自己电脑上的文本文件，不被任何公司锁住。
 
@@ -49,6 +49,15 @@ AI 只负责理解你的话，**账由程序记**：
 
 - **通用**：普通人的日常记账，说话就能记。
 - **专攻**：多地区、多账户的投资者——国内支付、港美银行与券商、多币种净资产（计划中的“投资者包”）。
+
+## 开发
+
+需要 Python 3.11 或更新版本，运行时没有第三方依赖。
+
+```bash
+python -m pip install -e .
+python -m unittest discover -s tests -v
+```
 
 ## 文档
 

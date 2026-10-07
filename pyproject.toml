@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "money-mom"
+version = "0.0.1"
+description = "Money Mom: an append-only, double-entry ledger engine for AI agents."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Office/Business :: Financial :: Accounting",
+]
+
+[project.urls]
+Homepage = "https://github.com/imoneys10k/money-mom"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/money_mom"]
