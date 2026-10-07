@@ -436,7 +436,9 @@ class LedgerState:
         out: set[str] = set()
         for rec in self.txns.values():
             void = voids.get(rec.void_event_id or "")
-            if rec.status == "voided" and rec.event.import_hash and void is not None and isinstance(void.meta.get("duplicate_of"), str):
+            if rec.status == "voided" and rec.event.import_hash and void is not None and (
+                isinstance(void.meta.get("duplicate_of"), str) or isinstance(void.meta.get("merged_into"), str)
+            ):
                 out.add(rec.event.import_hash)
         return out
 

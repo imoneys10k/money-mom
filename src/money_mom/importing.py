@@ -697,7 +697,7 @@ def run_import(
         probe = Item(
             id=None, date=row.date, account=statement_account, amount=row.amount, ccy=ccy, payee=row.payee,
             narration=row.description, origin=("import", parsed.sha256), via=row.via, status="pending", held=False,
-            has_hash=True, source=f"import:{parsed.filename}",
+            has_hash=True, source=f"import:{parsed.filename}", open_counter=not counter,
         )
         matches = candidates_for_probe(ledger.state, aliases, probe)
         if not counter:
@@ -716,7 +716,8 @@ def run_import(
             meta["held"] = HELD
             held_rows.append({
                 "line": row.line, "date": row.date.isoformat(), "amount": _fmt(row.amount), "payee": row.payee or None,
-                "description": row.description or None, "tier": matches[0].tier, "evidence": list(matches[0].evidence),
+                "description": row.description or None, "kind": matches[0].kind, "tier": matches[0].tier,
+                "evidence": list(matches[0].evidence),
                 "matches": [(m.a if m.b is probe else m.b).json() for m in matches][:3],
             })
         events.append(ledger.new_event(

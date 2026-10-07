@@ -17,7 +17,7 @@ from .errors import ValidationError
 
 SCHEMA_VERSION = 1
 KINDS = ("open", "close", "txn", "confirm", "void", "assert", "price", "review")
-VERDICTS = ("same", "different")
+VERDICTS = ("same", "different", "transfer")
 ROOTS = ("Assets", "Liabilities", "Equity", "Income", "Expenses")
 ACTOR_TYPES = ("human", "agent")
 SOURCE_TYPES = ("chat", "file", "screenshot", "import", "manual")
@@ -134,8 +134,9 @@ class Price(Event):
 @dataclass(frozen=True, kw_only=True)
 class Review(Event):
     """A person's judgement about two transactions: they are the same real-world payment (`same`, and which one
-    to `keep`) or two different ones (`different`, so nobody asks again). Writing it changes nothing by itself;
-    for `same` the dropped one is voided by a separate `void` event written in the same batch."""
+    to `keep`), two different ones (`different`, so nobody asks again), or the two sides of one transfer between
+    their own accounts (`transfer`). Writing it changes nothing by itself; the events that act on it (a `void`, and
+    for a transfer the new transaction) are written in the same batch."""
 
     targets: tuple[str, str]
     verdict: str

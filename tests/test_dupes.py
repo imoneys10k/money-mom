@@ -87,6 +87,39 @@ class Compare(unittest.TestCase):
         self.assertEqual(suggest_keep(item(id="a"), item(id="b", date=dt.date(2026, 9, 4))), "a")
 
 
+class TransferCompare(unittest.TestCase):
+    def test_two_statements_showing_one_transfer_are_a_likely_pair_with_wording_or_a_named_account(self):
+        bank = stmt(id="a", account="Assets:银行卡", amount=D("-500"), payee="财付通", narration="微信零钱充值", sha="bank")
+        wallet = stmt(id="b", amount=D("500"), payee="零钱充值", sha="wx")
+        c = compare(bank, wallet, {})
+        self.assertEqual((c.kind, c.tier), ("transfer", "likely"))
+        self.assertIn("transfer_wording", c.evidence)
+        self.assertEqual(c.json()["suggest"], "transfer")
+        self.assertIsNone(c.json()["suggest_keep"])
+        # naming the other account counts even without a transfer word
+        named = compare(stmt(id="a", account="Assets:银行卡", amount=D("-500"), payee="微信", sha="bank"),
+                        stmt(id="b", amount=D("500"), payee="某公司", sha="wx"), {"微信": "Assets:微信"})
+        self.assertEqual((named.tier, "one_side_names_the_other_account" in named.evidence), ("likely", True))
+
+    def test_without_a_reason_it_is_only_worth_asking_while_a_side_is_unclassified(self):
+        a = stmt(id="a", account="Assets:银行卡", amount=D("-500"), payee="某人", sha="bank")
+        b = stmt(id="b", amount=D("500"), payee="另一人", sha="wx")
+        self.assertIsNone(compare(a, b, {}))  # both already classified by the user's own rules
+        open_side = stmt(id="b", amount=D("500"), payee="另一人", sha="wx", open_counter=True)
+        self.assertEqual(compare(a, open_side, {}).tier, "possible")
+
+    def test_what_is_never_a_transfer_pair(self):
+        a = stmt(id="a", account="Assets:银行卡", amount=D("-500"), payee="转账", sha="bank")
+        far = stmt(id="b", amount=D("500"), date=dt.date(2026, 9, 7), payee="转账", sha="wx")
+        self.assertIsNone(compare(a, far, {}))
+        self.assertIsNone(compare(a, stmt(id="b", account="Assets:银行卡", amount=D("500"), payee="转账", sha="wx"), {}))  # same account
+        self.assertIsNone(compare(a, stmt(id="b", amount=D("500"), payee="转账", sha="bank"), {}))  # one file
+        self.assertIsNone(compare(item(id="a", account="Assets:银行卡", amount=D("-500"), payee="转账"),
+                                  item(id="b", amount=D("500"), payee="转账", origin=("entry", "b")), {}))  # two hand entries
+        self.assertIsNone(compare(a, stmt(id="b", amount=D("500.01"), payee="转账", sha="wx"), {}))
+        self.assertIsNone(compare(a, stmt(id="b", amount=D("500"), ccy="USD", payee="转账", sha="wx"), {}))
+
+
 class Detect(LedgerTestCase):
     def setUp(self):
         super().setUp()
@@ -296,6 +329,119 @@ class Flow(CliTestCase):
         self.run_cli("--ledger", str(empty), "init")
         text, _ = self.run_cli("--ledger", str(empty), "dupes")
         self.assertIn("No duplicate candidates", text)
+
+
+BANK_MAP = """
+ccy = "CNY"
+[columns]
+date = "日期"
+amount = "金额"
+payee = "对方"
+description = "说明"
+id = "单号"
+[format]
+date = "%Y-%m-%d"
+sign = "inflow_positive"
+"""
+BANK_CSV = """日期,金额,对方,说明,单号
+2026-09-10,-500.00,财付通,微信零钱充值,B1
+2026-09-11,-30.00,某商店,购物,B2
+"""
+TOPUP_WX = """日期,金额,对方,说明,单号,支付方式
+2026-09-10,500.00,零钱充值,从银行卡充值,W9,招商银行(1234)
+2026-09-12,-9.90,某小店,零食,W3,零钱
+"""
+
+
+class TransferFlow(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.js("init", "--template", "cn", "--date", "2026-01-01")
+        self.js("transfer", "1000", "--from", "期初", "--to", "微信", "--date", "2026-01-02")
+        self.js("transfer", "2000", "--from", "期初", "--to", "银行卡", "--date", "2026-01-02")
+        self.files = self.dir / "files"
+        self.files.mkdir()
+        for name, text in (("wx.toml", WX_MAP), ("bank.toml", BANK_MAP), ("bank.csv", BANK_CSV), ("wx.csv", TOPUP_WX)):
+            (self.files / name).write_text(text, encoding="utf-8")
+        self.js("import", "save-map", "wx", str(self.files / "wx.toml"))
+        self.js("import", "save-map", "bank", str(self.files / "bank.toml"))
+
+    def imp(self, name, mapping, account):
+        return self.js("import", "run", str(self.files / name), "--map", mapping, "--account", account)["data"]
+
+    def bal(self, account):
+        out, _ = self.run_cli("--ledger", str(self.root), "balance", "--account", account)
+        return out
+
+    def held_pair(self):
+        self.imp("bank.csv", "bank", "银行卡")
+        data = self.imp("wx.csv", "wx", "微信")
+        return data, self.js("dupes")["data"]["candidates"]
+
+    def test_the_second_statement_row_is_held_as_one_side_of_a_transfer(self):
+        data, cands = self.held_pair()
+        self.assertEqual(data["held_for_duplicates"], 1)
+        self.assertEqual((data["possible_duplicates"][0]["kind"], data["possible_duplicates"][0]["tier"]), ("transfer", "likely"))
+        self.assertEqual([(c["kind"], c["suggest"]) for c in cands], [("transfer", "transfer")])
+        text, _ = self.run_cli("--ledger", str(self.root), "dupes")
+        self.assertIn("two sides of one transfer?", text)
+        self.assertIn("--transfer", text)
+
+    def test_the_user_says_transfer_both_rows_become_one_real_transfer(self):
+        _, cands = self.held_pair()
+        done = self.js("dupes", "resolve", *cands[0]["ids"], "--transfer")["data"]
+        self.assertEqual(sorted(done["voided_both"]), sorted(cands[0]["ids"]))
+        self.assertIsNotNone(done["transfer"])
+        # 2000 - 500 (out of the card) and 1000 + 500 (into the wallet): the money simply moved
+        self.assertIn("1500.00", self.bal("Assets:银行卡"))
+        self.assertIn("1500.00", self.bal("Assets:微信"))
+        shown = self.js("show", done["transfer"])["data"]
+        self.assertIn(cands[0]["ids"][0], json.dumps(shown, ensure_ascii=False))
+        self.assertEqual(self.js("dupes")["data"]["count"], 0)
+        # importing the same statements again brings neither row back
+        again = (self.imp("bank.csv", "bank", "银行卡"), self.imp("wx.csv", "wx", "微信"))
+        self.assertEqual([(d["imported"], d["duplicates_skipped"]) for d in again], [(0, 2), (0, 2)])
+
+    def test_the_transfer_is_dated_when_the_money_left_not_when_it_arrived(self):
+        (self.files / "wx.csv").write_text(TOPUP_WX.replace("2026-09-10,500.00", "2026-09-11,500.00"), encoding="utf-8")
+        _, cands = self.held_pair()
+        self.assertEqual(cands[0]["days_apart"], 1)
+        done = self.js("dupes", "resolve", *cands[0]["ids"], "--transfer")["data"]
+        rows = self.js("query", f"SELECT date FROM txns WHERE id = '{done['transfer']}'")["data"]["rows"]
+        self.assertEqual(rows, [["2026-09-10"]])
+
+    def test_an_agent_needs_the_users_words_and_the_chain_stays_intact(self):
+        _, cands = self.held_pair()
+        denied = self.js("dupes", "resolve", *cands[0]["ids"], "--transfer", "--actor", "agent:claude-code", expect=1)
+        self.assertEqual(denied["error"]["code"], "user_decision_required")
+        self.js("dupes", "resolve", *cands[0]["ids"], "--transfer", "--actor", "agent:claude-code", "--user-said", "对，是我从银行卡充到微信")
+        self.assertTrue(self.js("verify")["data"]["ok"])
+        self.assertTrue(self.js("check")["data"]["ok"])
+
+    def test_different_leaves_the_rows_alone_and_the_pair_is_never_asked_again(self):
+        _, cands = self.held_pair()
+        done = self.js("dupes", "resolve", *cands[0]["ids"], "--different")["data"]
+        self.assertEqual(done["released"], [])  # the held row still has no category, so it stays pending the usual way
+        self.assertEqual(self.js("dupes")["data"]["count"], 0)
+
+    def test_transfer_is_refused_for_a_pair_that_cannot_be_one(self):
+        self.imp("bank.csv", "bank", "银行卡")
+        self.js("spend", "30", "--from", "微信", "--category", "零食", "--date", "2026-09-11")
+        pair = [t["id"] for t in self.js("pending")["data"]][:1]
+        spend_id = self.js("query", "SELECT id FROM txns WHERE narration IS NULL AND status = 'posted' ORDER BY date DESC LIMIT 1")["data"]["rows"][0][0]
+        refused = self.js("dupes", "resolve", pair[0], spend_id, "--transfer", expect=1)
+        self.assertEqual(refused["error"]["code"], "invalid_review")
+        self.assertEqual(self.js("dupes", "resolve", pair[0], spend_id, "--different", "--keep", pair[0], expect=1)["error"]["code"], "invalid_review")
+
+    def test_rows_the_users_own_rules_already_classified_are_not_asked_about_without_a_reason(self):
+        (self.files / "bank.csv").write_text(BANK_CSV.replace("财付通", "某人").replace("微信零钱充值", "还你"), encoding="utf-8")
+        (self.files / "wx.csv").write_text(TOPUP_WX.replace("零钱充值", "某人2").replace("从银行卡充值", "收款"), encoding="utf-8")
+        self.js("import", "rule-add", "--map", "bank", "--match", "某人", "--account", "咖啡")
+        self.js("import", "rule-add", "--map", "wx", "--match", "某人2", "--account", "咖啡")
+        self.imp("bank.csv", "bank", "银行卡")
+        data = self.imp("wx.csv", "wx", "微信")
+        self.assertEqual(data["held_for_duplicates"], 0)
+        self.assertEqual(self.js("dupes")["data"]["count"], 0)
 
 
 if __name__ == "__main__":

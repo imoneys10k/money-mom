@@ -250,7 +250,7 @@ Statements are CSV or `.xlsx` files (an `.xlsx` is read directly: first sheet, d
 
    `recheck` settles every waiting row of that mapping that now matches. Rules never guess: unmatched rows stay pending. Use `--regex` for patterns and `--skip` instead of `--account` to drop rows.
 6. **Importing is safe to repeat.** Every row has a stable hash, so rows already in the ledger are skipped (`duplicates_skipped`). To bring in only newer rows, or to avoid a locked period, use `--since DATE`.
-7. **A transfer between the user's own accounts appears on both statements.** Import it from one side only: give the other mapping a `rule-add --skip` for it, or you will record it twice.
+7. **A transfer between the user's own accounts appears on both statements.** Importing both is fine: the second row is held and the user is asked (section 5b), and one real transfer replaces the two rows. If the user would rather never see them, import it from one side only with a `rule-add --skip` on the other mapping.
 8. After importing, offer to reconcile (section 4).
 
 For a source that is not a CSV (a PDF, a screenshot, a list the user typed), write the entries yourself in one atomic batch:
@@ -291,7 +291,13 @@ money-mom dupes resolve A_ID B_ID --different --user-said "不是，我喝了两
 
 An agent must pass `--user-said` (what the user answered) or the command is refused (`user_decision_required`). A held row that resembles two entries is released only after both pairs are answered. A voided duplicate stays skipped when the statement is imported again. To change an answer, `void` the review event and ask again.
 
-Not covered: a transfer between the user's own accounts that shows on both statements (see step 7 above), and rows with no amount match at all.
+**A transfer between the user's own accounts shows on both statements** (money out of the bank, money into the wallet). A pair with the *opposite* amounts in two different accounts is listed with `kind: "transfer"`: the evidence is that one side names the other account or says 转账 / 充值 / 提现 / 还款, within a day or two; without such a reason it is only raised while one side has no category yet (rows the user's own rules already classified are left alone). Ask "是不是你自己的账户之间转的一笔？", and if yes:
+
+```bash
+money-mom dupes resolve A_ID B_ID --transfer --user-said "对，我从银行卡充到微信" --actor agent:claude-code
+```
+
+Both rows are voided (nothing is deleted) and one real transfer between the two accounts is recorded in their place, dated when the money left. Re-importing the statements does not bring either row back. `--different` still means "not related".
 
 ## 5c. Has the ledger been changed behind my back?
 
@@ -312,7 +318,7 @@ Exit code 1 means the ledger said no; 2 means the command line was wrong. With `
 | `confidence_required`, `confidence_too_low` | Pass an honest `--confidence`; below the threshold record it as pending. |
 | `duplicate_import` | Already recorded. Tell the user; do not force it. (`import run` skips repeats by itself.) |
 | `user_decision_required` | A judgement about a duplicate is the user's. Ask them, then pass their answer with `--user-said`. |
-| `invalid_review` | `--same` needs `--keep` (one of the two ids); `--different` takes no `--keep`. |
+| `invalid_review` | `--same` needs `--keep` (one of the two ids); `--different` and `--transfer` take no `--keep`; `--transfer` needs two simple entries on different accounts with opposite amounts. |
 | `invalid_statement` | The file could not be read; the message names the lines. Check the mapping with `import inspect`, or `--encoding`. |
 | `invalid_mapping`, `unknown_mapping` | The mapping is invalid or not saved. Fix the TOML and `import save-map` it again. |
 | `reconcile_not_clean` | `--assert` only seals a clean reconciliation. Show the user what is left. |

@@ -183,12 +183,14 @@
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `targets` | 是 | 恰好两个不同的交易 ID |
-| `verdict` | 是 | `same`（同一笔）或 `different`（两笔，以后不再问） |
-| `keep` | `same` 时必填 | 保留哪一笔（必须是 `targets` 之一）；`different` 不能带 |
+| `verdict` | 是 | `same`（同一笔）、`different`（两笔，以后不再问）或 `transfer`（自己账户之间同一笔转账的两侧） |
+| `keep` | `same` 时必填 | 保留哪一笔（必须是 `targets` 之一）；其他裁决不能带 |
 
-`review` 本身不改变任何余额。`same` 的写入同时带一个对另一笔的 `void`（`reason` 为 `duplicate of <keep>`，`meta.duplicate_of` 为保留那笔的 ID），两者在同一批里全有或全无；`different` 若放行了一笔被挂起的导入行，则同批再带一个 `confirm`（`meta.released_by_review`）。`review` 也可以被 `void`，那样这一对会重新出现在候选里。agent 写入时 `meta.user_said` 记录用户的原话。
+`review` 本身不改变任何余额。`same` 的写入同时带一个对另一笔的 `void`（`reason` 为 `duplicate of <keep>`，`meta.duplicate_of` 为保留那笔的 ID），两者在同一批里全有或全无；`transfer` 同批带一个新的转账交易（来源 `manual`，`meta.merged_from` 为两个目标；两条分录就是两笔的资产分录，日期取较早的，即钱离开的那天）和对两个目标的 `void`（`meta.merged_into` 为新交易的 ID）；`different` 若放行了一笔被挂起的导入行，则同批再带一个 `confirm`（`meta.released_by_review`）。`review` 也可以被 `void`，那样这一对会重新出现在候选里。agent 写入时 `meta.user_said` 记录用户的原话。
 
 **候选**不是事件，是每次从当前状态推导出来的：只比较“一条资产或负债分录”的简单收支（转账与换汇不在其内）；币种、金额（含正负）完全相同；日期相差不超过窗口（默认 2 天）；来源不同——同一份账单文件的行共用一个来源（`source.sha256`），其余每条记录各自是一个来源，而两条手记只在同一天同一账户里才算候选。证据与档位：账单行 `meta.import.via`（支付方式）指向另一条的账户（账户别名里的名字或 4 位数字，或账户名里的非通用词）、对方或说明相同（规范化后相等或互相包含）→ 一天内即为 `likely`；账单行与手记在同一天同一账户 → `likely`；其余 `possible`。已有 `review`（未被作废）的一对不再出现。
+
+**转账候选**（`kind: "transfer"`）：币种相同、金额互为相反数、账户不同、来源不同（两条手记不算）、日期在窗口内；一边的文字或支付方式点名了另一边的账户，或带转账字样（转账、充值、提现、还款、transfer 等），一天内为 `likely`；没有这些理由时，只有一边还没分类（对方账户为 `null`）才是 `possible`，两边都被规则分好类的不问。
 
 导入时，一行若与账本中已有记录构成候选，则写成 `pending` 并带 `meta.held = "duplicate_review"`；`import_hash` 照常写入。被判为 `same` 而作废的导入行，其 `import_hash` 在再次导入时仍然被视为“已导入”，不会回来。
 
@@ -216,7 +218,7 @@
 - `confirm` 与 `void` 的目标存在，且不重复作废。
 - 所有 `assert` 与由事件流算出的余额一致。
 - `import_hash` 在账本内不重复，除非显式标注。
-- `review` 的两个目标都存在；`void` 的目标也可以是 `review`。
+- `review` 的两个目标都存在；`void` 的目标也可以是 `review`；`transfer` 裁决带出的新交易借贷平衡，两个旧目标被作废。
 - 哈希链没有被改动（`verify`）。
 
 ## 导出 Beancount（对应关系）

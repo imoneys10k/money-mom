@@ -444,13 +444,13 @@ def _import_text(data: dict[str, Any]) -> str:
     lines += [f"    e.g. {example}" for example in data["ignored_examples"]]
     if data["held_for_duplicates"]:
         lines.append(
-            f"  {data['held_for_duplicates']} row(s) look like payments the ledger already has, so they are held as pending "
-            "(not counted in any balance) until the user says whether each is the same payment:"
+            f"  {data['held_for_duplicates']} row(s) look like a payment the ledger already has, or the other side of a transfer "
+            "between the user's own accounts, so they are held as pending (not counted in any balance) until the user answers:"
         )
         for row in data["possible_duplicates"][:10]:
             other = row["matches"][0]
             label = row["payee"] or row["description"] or ""
-            lines.append(f"    [{row['tier']}] line {row['line']}  {row['date']}  {row['amount']}  {label}  ~  {other['id']} ({other['account']}, {other['source']})")
+            lines.append(f"    [{row['tier']}{', transfer?' if row['kind'] == 'transfer' else ''}] line {row['line']}  {row['date']}  {row['amount']}  {label}  ~  {other['id']} ({other['account']}, {other['source']})")
         lines.append("  Run `money-mom dupes`, show them to the user, then record their answer with `money-mom dupes resolve`.")
     if data["unresolved_payees"]:
         lines.append("  Ask the user a category for these payees; each answer becomes a rule:")
@@ -906,20 +906,23 @@ def _dupe_lines(items: list[dict[str, Any]]) -> list[str]:
     lines = []
     for c in items:
         a, b = c["a"], c["b"]
-        lines.append(f"  [{c['tier']}] {a['amount']} {a['ccy']}, {c['days_apart']} day(s) apart")
+        what = "two sides of one transfer?" if c["kind"] == "transfer" else "same payment?"
+        lines.append(f"  [{c['tier']}] {what} {a['amount']} / {b['amount']} {a['ccy']}, {c['days_apart']} day(s) apart")
         for tag, side in (("A", a), ("B", b)):
             label = side["payee"] or side["narration"] or ""
             held = "  (held: waiting for your answer)" if side["held_for_review"] else ""
             lines.append(f"      {tag} {side['id']}  {side['date']}  {side['account']}  {label}  [{side['status']}, {side['source']}]{held}")
         lines.append(f"      evidence: {', '.join(c['evidence'])}")
-        lines.append(f"      if the same payment, keep {c['suggest_keep']}")
+        lines.append("      if so, record it as one transfer: money-mom dupes resolve A_ID B_ID --transfer" if c["kind"] == "transfer"
+                     else f"      if the same payment, keep {c['suggest_keep']}")
     return lines
 
 
 _DUPE_HOW = (
     "Show these to the user and let them decide; never decide for them. Their answer:\n"
     "  same payment:  money-mom dupes resolve A_ID B_ID --same --keep ID --user-said \"...\"\n"
-    "  two payments:  money-mom dupes resolve A_ID B_ID --different --user-said \"...\""
+    "  two payments:  money-mom dupes resolve A_ID B_ID --different --user-said \"...\"\n"
+    "  one transfer between the user's own accounts:  money-mom dupes resolve A_ID B_ID --transfer --user-said \"...\""
 )
 
 
@@ -929,11 +932,15 @@ def cmd_dupes(args: argparse.Namespace) -> tuple[Any, str]:
     action = getattr(args, "dupes_command", None) or "list"
     if action == "resolve":
         data = resolve_pair(
-            ledger, args.first, args.second, verdict="same" if args.same else "different", keep=args.keep,
+            ledger, args.first, args.second, verdict="same" if args.same else "transfer" if args.transfer else "different",
+            keep=args.keep,
             actor=_actor(args), user_said=args.user_said, window=window, meta=_override_meta(args),
         )
         if data["verdict"] == "same":
             text = f"Recorded: {data['kept']} and {data['voided']} are the same payment; {data['voided']} was voided (nothing is deleted)."
+        elif data["verdict"] == "transfer":
+            text = (f"Recorded: these are the two sides of one transfer. Both were voided (nothing is deleted) and one transfer, "
+                    f"{data['transfer']}, was recorded in their place.")
         else:
             text = "Recorded: these are two different payments. They will not be asked about again."
         if data["released"]:
@@ -1245,6 +1252,7 @@ def _build_parser() -> argparse.ArgumentParser:
     group = q.add_mutually_exclusive_group(required=True)
     group.add_argument("--same", action="store_true", help="they are the same payment: one is voided (nothing is deleted)")
     group.add_argument("--different", action="store_true", help="they are two payments: remembered, never asked again")
+    group.add_argument("--transfer", action="store_true", help="they are the two sides of one transfer between your own accounts: both are voided and one transfer is recorded")
     q.add_argument("--keep", help="with --same: the id to keep (the other is voided)")
     q.add_argument("--user-said", metavar="TEXT", help="an agent must pass what the user answered")
     q.add_argument("--window", type=int)

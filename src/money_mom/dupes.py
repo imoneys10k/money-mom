@@ -11,7 +11,10 @@ as *pending* and held until the person answers, so it never reaches a balance be
 
 Evidence, strongest first: the payment method on the statement row points at the other entry's account; the
 payee or description matches; the dates are the same day. Equal amounts alone are only ever a *possible*.
-Transfers between the person's own accounts (two asset postings) are not covered.
+
+A second kind of candidate is the two sides of one transfer between the person's own accounts: money leaves one
+account and arrives in another, so each statement shows it once, with opposite signs. If the person says
+`transfer`, both rows are voided and one real transfer is recorded in their place.
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ class Item:
     held: bool
     has_hash: bool
     source: str
+    open_counter: bool = False  # the other side of the entry is not decided yet (an account is still `?`)
 
     def names(self) -> set[str]:
         return {n for n in (_norm(self.payee), _norm(self.narration)) if n}
@@ -69,12 +73,14 @@ class Candidate:
     days_apart: int
     a: Item
     b: Item
+    kind: str = "payment"  # "payment": the same payment twice; "transfer": the two sides of one own-account transfer
 
     def json(self) -> dict[str, Any]:
         return {
-            "tier": self.tier, "evidence": list(self.evidence), "days_apart": self.days_apart,
+            "kind": self.kind, "tier": self.tier, "evidence": list(self.evidence), "days_apart": self.days_apart,
             "ids": [self.a.id, self.b.id], "a": self.a.json(), "b": self.b.json(),
-            "suggest_keep": suggest_keep(self.a, self.b),
+            "suggest_keep": suggest_keep(self.a, self.b) if self.kind == "payment" else None,
+            "suggest": "same" if self.kind == "payment" else "transfer",
         }
 
 
@@ -105,11 +111,12 @@ def item_from_record(rec: TxnRecord) -> Item | None:
     info = ev.meta.get("import") if isinstance(ev.meta.get("import"), dict) else {}
     source = ev.source or {}
     label = f"{source.get('type', 'entry')}:{source['ref']}" if source.get("ref") else source.get("type", "entry")
+    others = [p for p in rec.postings if p is not money]
     return Item(
         id=rec.id, date=rec.date, account=money.account or "", amount=money.amount, ccy=money.ccy,
         payee=ev.payee or "", narration=ev.narration or "", origin=origin_of(ev),
         via=str(info.get("via") or ""), status=rec.status, held=ev.meta.get("held") == HELD,
-        has_hash=bool(ev.import_hash), source=label,
+        has_hash=bool(ev.import_hash), source=label, open_counter=any(p.account is None for p in others),
     )
 
 
@@ -152,9 +159,53 @@ def _same_names(a: Item, b: Item) -> bool:
     return False
 
 
+_TRANSFER_WORDS = ("转账", "充值", "提现", "还款", "转入", "转出", "transfer", "top-up", "topup", "withdraw")
+
+
+def _mentions_account(text: str, other: Item, aliases: dict[str, str]) -> bool:
+    low = text.casefold()
+    return bool(low) and any(t in low for t in _tokens(other.account, aliases))
+
+
+def compare_transfer(a: Item, b: Item, aliases: dict[str, str], window: int) -> Candidate | None:
+    """The two sides of one transfer between own accounts: opposite amounts, different accounts, different origin."""
+    days = abs((a.date - b.date).days)
+    if days > window or a.origin == b.origin or a.account == b.account:
+        return None
+    if a.origin[0] == "entry" and b.origin[0] == "entry":
+        return None  # a hand-made transfer is already one entry; two hand entries are not two statements
+    evidence: list[str] = []
+    text = f"{a.payee} {a.narration} {b.payee} {b.narration}"
+    linked = (
+        _mentions_account(f"{a.payee} {a.narration} {a.via}", b, aliases)
+        or _mentions_account(f"{b.payee} {b.narration} {b.via}", a, aliases)
+        or _payment_link(a.via, b, aliases) or _payment_link(b.via, a, aliases)
+    )
+    if linked:
+        evidence.append("one_side_names_the_other_account")
+    wording = any(w in text.casefold() for w in _TRANSFER_WORDS)
+    if wording:
+        evidence.append("transfer_wording")
+    evidence.append("opposite_amounts")
+    evidence.append("same_day" if days == 0 else f"{days}_day{'s' if days > 1 else ''}_apart")
+    evidence.append("different_accounts")
+    if days <= 1 and (linked or wording):
+        tier = "likely"
+    elif a.open_counter or b.open_counter:
+        tier = "possible"  # without a reason, only worth asking while a side is still unclassified
+    else:
+        return None
+    return Candidate(tier, tuple(evidence), days, a, b, kind="transfer")
+
+
 def compare(a: Item, b: Item, aliases: dict[str, str], window: int = DEFAULT_WINDOW_DAYS) -> Candidate | None:
-    """Is this pair worth asking about? Equal amount, currency and sign are required; the rest is evidence."""
-    if a.ccy != b.ccy or a.amount != b.amount:
+    """Is this pair worth asking about? Equal amount, currency and sign (or, for a transfer, the opposite sign
+    in another account) are required; the rest is evidence."""
+    if a.ccy != b.ccy:
+        return None
+    if a.amount == -b.amount and a.amount != 0:
+        return compare_transfer(a, b, aliases, window)
+    if a.amount != b.amount:
         return None
     days = abs((a.date - b.date).days)
     if days > window:
@@ -205,7 +256,7 @@ def find_candidates(
     judged = set(state.judged_pairs()) | set(extra_judged)
     buckets: dict[tuple[str, Decimal], list[Item]] = {}
     for item in _items(state, set(exclude)):
-        buckets.setdefault((item.ccy, item.amount), []).append(item)
+        buckets.setdefault((item.ccy, abs(item.amount)), []).append(item)
     found = []
     for items in buckets.values():
         for i, a in enumerate(items):
@@ -252,12 +303,13 @@ def resolve_pair(
     meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write the person's judgement. `same` records a review and voids the other one (nothing is deleted);
-    `different` records a review so the pair is never asked about again. A held statement row that has no
-    unresolved candidates left afterwards is confirmed, which is the moment it first reaches a balance."""
+    `different` records a review so the pair is never asked about again; `transfer` voids both and records one
+    transfer between the two accounts in their place. A held statement row that has no unresolved candidates left
+    afterwards is confirmed, which is the moment it first reaches a balance."""
     ledger.reload()
     state = ledger.state
-    if verdict not in ("same", "different"):
-        raise LedgerError("the verdict must be `same` or `different`", code="invalid_review")
+    if verdict not in ("same", "different", "transfer"):
+        raise LedgerError("the verdict must be `same`, `different` or `transfer`", code="invalid_review")
     if first == second:
         raise LedgerError("give two different transaction ids", code="invalid_review")
     for target in (first, second):
@@ -277,26 +329,51 @@ def resolve_pair(
     elif keep is not None:
         raise LedgerError("--keep only goes with a `same` verdict", code="invalid_review")
     note = {"user_said": user_said.strip()} if user_said and user_said.strip() else {}
+    extra = {**note, **(meta or {})}
     review = ledger.new_event(
-        "review", actor=actor, meta={**note, **(meta or {})} or None,
-        targets=[first, second], verdict=verdict, keep=keep,
+        "review", actor=actor, meta=extra or None, targets=[first, second], verdict=verdict, keep=keep,
     )
     events = [review]
-    drop = None
+    dropped: list[str] = []
+    new_transfer = None
     if verdict == "same":
-        drop = second if keep == first else first
+        dropped = [second if keep == first else first]
         events.append(ledger.new_event(
-            "void", actor=actor, target=drop, reason=f"duplicate of {keep}",
-            meta={**note, **(meta or {}), "duplicate_of": keep},
+            "void", actor=actor, target=dropped[0], reason=f"duplicate of {keep}", meta={**extra, "duplicate_of": keep},
         ))
+    elif verdict == "transfer":
+        ia, ib = item_from_record(state.txns[first]), item_from_record(state.txns[second])
+        if ia is None or ib is None or ia.ccy != ib.ccy or ia.amount != -ib.amount or ia.account == ib.account:
+            raise LedgerError(
+                "these are not the two sides of one transfer: each must be a simple entry on its own account, with "
+                "opposite amounts in the same currency",
+                code="invalid_review",
+            )
+        narration = next((i.narration for i in (ia, ib) if i.narration), None)
+        new_transfer = ledger.new_event(
+            "txn", actor=actor, source={"type": "manual", "ref": "merged from two statements"},
+            confidence=1.0 if actor[0] == "agent" else None, narration=narration, date=min(ia.date, ib.date).isoformat(),
+            status="posted", meta={**extra, "merged_from": [first, second]},
+            postings=[
+                {"account": ia.account, "amount": format(ia.amount, "f"), "ccy": ia.ccy},
+                {"account": ib.account, "amount": format(ib.amount, "f"), "ccy": ib.ccy},
+            ],
+        )
+        events.append(new_transfer)
+        dropped = [first, second]
+        for target in dropped:
+            events.append(ledger.new_event(
+                "void", actor=actor, target=target, reason=f"two sides of one transfer, recorded as {new_transfer['id']}",
+                meta={**extra, "merged_into": new_transfer["id"]},
+            ))
     aliases = ledger.aliases()
     remaining = find_candidates(
-        state, aliases, window=window, exclude={drop} if drop else (), extra_judged=[frozenset({first, second})]
+        state, aliases, window=window, exclude=set(dropped), extra_judged=[frozenset({first, second})]
     )
     released = []
     for target in (first, second):
         rec = state.txns[target]
-        if target == drop or rec.status != "pending" or rec.event.meta.get("held") != HELD:
+        if target in dropped or rec.status != "pending" or rec.event.meta.get("held") != HELD:
             continue
         if any(p.account is None for p in rec.postings) or candidates_involving(remaining, target):
             continue
@@ -304,6 +381,8 @@ def resolve_pair(
         released.append(target)
     ledger.append_many(events, clamp_ts=True)
     return {
-        "verdict": verdict, "review": review["id"], "kept": keep, "voided": drop, "released": released,
+        "verdict": verdict, "review": review["id"], "kept": keep, "voided": dropped[0] if verdict == "same" else None,
+        "voided_both": dropped if verdict == "transfer" else None,
+        "transfer": new_transfer["id"] if new_transfer else None, "released": released,
         "still_asking": [c.json() for c in remaining if first in (c.a.id, c.b.id) or second in (c.a.id, c.b.id)],
     }

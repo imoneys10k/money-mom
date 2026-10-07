@@ -143,7 +143,8 @@ money-mom dupes resolve ID1 ID2 --different              # you say "two payments
 - **The program finds candidates and never decides.** Amount, currency and direction must be identical and the dates close (within two days by default). Then the evidence: the payment method on a statement row points at the other entry's account (a WeChat row says "招商银行信用卡(1234)" and you gave that card an alias containing 1234), the payee or description matches, or a hand entry and a statement row fall on the same day in the same account. Strong evidence is `likely`; equal amounts alone are `possible`.
 - **A statement row it is unsure about is held.** On import, a row that looks like an existing entry is recorded as *pending* (in no balance) until you answer: "same payment" voids it, "two payments" books it. A voided row does not come back when the same statement is imported again.
 - **An AI must relay your answer** (`--user-said`) or the command is refused. Every judgement is an event in the ledger, so it can be traced and undone.
-- **Not covered:** transfers between your own accounts that appear on both statements; repeated rows inside one file (the row hash already handles those).
+- **Transfers between your own accounts** (the bank shows -500 and the wallet shows +500, once on each statement) are found too: opposite amounts, different accounts, and one side names the other account or says transfer, top-up, withdrawal or repayment. If you say "that is one transfer" (`dupes resolve ID1 ID2 --transfer`), both rows are voided and one real transfer takes their place. With no such reason it only asks while one side is still unclassified; rows your own rules already classified are left alone.
+- **Not covered:** repeated rows inside one file (the row hash already handles those).
 
 ## Tamper-evident
 
@@ -211,7 +212,7 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 | | |
 |---|---|
 | Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · `.xlsx` statements read directly · duplicates across sources (candidates, held rows, you decide) · hash chain (`verify`) · on PyPI · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | "Mom" tone levels · verify the Alipay mapping against a real export, and WeChat against more samples · spotting the same transfer on both of your own accounts |
+| Next | "Mom" tone levels · verify the Alipay mapping against a real export, and WeChat against more samples |
 | Later | npm launcher · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.
