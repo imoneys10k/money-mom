@@ -14,5 +14,7 @@
 - 命令行 `money-mom`（也可 `python -m money_mom`）：`init` / `open` / `close` / `add` / `confirm` / `void` / `assert` / `check` / `balance` / `pending` / `accounts` / `show` / `query`；每个命令都有 `--json` 输出，退出码 0 成功、1 账本拒绝、2 用法错误；`--from-json` 支持从文件或 stdin 原子批量写入。
 - SQLite 缓存（`cache.sqlite`，可随时删除）：按事件流指纹自动重建；`query` 只允许单条只读 SELECT（只读打开 + SQLite 授权器 + 5 秒超时 + 行数上限）。
 
+- 命令行表格按显示宽度对齐，中文账户名不再错位。
+
 ### Changed
 - 设计文档：确定 Python 标准库内核、npm 轻量启动器、Agent Skills 标准发布、引擎与 skill 分离并锁定版本。

@@ -237,6 +237,22 @@ class QueryCommand(CliTestCase):
         self.run_cli("--ledger", str(self.root), "accounts")
 
 
+class Alignment(unittest.TestCase):
+    def test_cjk_columns_line_up_by_display_width(self):
+        from money_mom.cli import _table, _width
+
+        table = _table(["account", "amt"], [["Assets:招行", "1"], ["Assets:abcdefgh", "2"], ["Expenses:餐饮:咖啡", "3"]])
+        rows = table.splitlines()[2:]
+        # the last column is one character wide, so everything before it must be equally wide
+        self.assertEqual(len({_width(line[:-1]) for line in rows}), 1, table)
+
+    def test_pending_postings_line_up(self):
+        from money_mom.cli import _width
+
+        self.assertEqual(_width("招行"), 4)
+        self.assertEqual(_width("abc"), 3)
+
+
 class RealProcess(unittest.TestCase):
     def run_module(self, *args):
         env = {**os.environ, "PYTHONPATH": SRC + os.pathsep + os.environ.get("PYTHONPATH", "")}

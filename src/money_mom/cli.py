@@ -12,6 +12,7 @@ import datetime as dt
 import json
 import os
 import sys
+import unicodedata
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
@@ -101,12 +102,25 @@ def _postings_json(postings) -> list[dict[str, Any]]:
     return [{"account": p.account, "amount": _fmt(p.amount), "ccy": p.ccy} for p in postings]
 
 
+def _width(text: str) -> int:
+    """Terminal display width: CJK characters take two columns."""
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in text)
+
+
+def _ljust(text: str, width: int) -> str:
+    return text + " " * (width - _width(text))
+
+
+def _rjust(text: str, width: int) -> str:
+    return " " * (width - _width(text)) + text
+
+
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
     cells = [[("NULL" if v is None else str(v)) for v in row] for row in rows]
-    widths = [max([len(h)] + [len(r[i]) for r in cells]) for i, h in enumerate(headers)]
-    lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths)).rstrip()]
+    widths = [max([_width(h)] + [_width(r[i]) for r in cells]) for i, h in enumerate(headers)]
+    lines = ["  ".join(_ljust(h, w) for h, w in zip(headers, widths)).rstrip()]
     lines.append("  ".join("-" * w for w in widths))
-    lines += ["  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip() for row in cells]
+    lines += ["  ".join(_ljust(c, w) for c, w in zip(row, widths)).rstrip() for row in cells]
     return "\n".join(lines)
 
 
@@ -268,7 +282,10 @@ def cmd_pending(args: argparse.Namespace) -> tuple[Any, str]:
         label = it["payee"] or it["narration"] or ""
         conf = "" if it["confidence"] is None else f"  confidence {it['confidence']}"
         lines.append(f"{it['id']}  {it['date']}  {label}{conf}")
-        lines += [f"    {p['account'] or '?':<28} {p['amount']:>12} {p['ccy']}" for p in it["postings"]]
+        lines += [
+            f"    {_ljust(p['account'] or '?', 28)} {_rjust(p['amount'], 12)} {p['ccy']}"
+            for p in it["postings"]
+        ]
     return items, "\n".join(lines)
 
 
