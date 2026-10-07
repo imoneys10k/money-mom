@@ -65,12 +65,15 @@ Extra flags for those three: `--ccy` (a code or word such as `USD` or `美元`; 
 | `rates set BASE QUOTE RATE --source TEXT [--date D]` | Record a rate yourself: 1 BASE = RATE QUOTE. A source is required. |
 | `rates list [--base B] [--quote Q]` | The latest stored rate for each pair. |
 | `show ID` | One transaction or assertion with every event that touched it. |
-| `import inspect FILE [--encoding E]` | Look at a statement CSV and suggest a mapping. Writes nothing. Says what it cannot decide (day/month dates, which sign is money in). |
+| `import inspect FILE [--encoding E]` | Look at a statement (CSV or `.xlsx`) and suggest a mapping. Writes nothing. Says what it cannot decide (day/month dates, which sign is money in). |
 | `import save-map NAME FILE\|-` / `import maps` | Validate a mapping (TOML) and store it under the ledger's `imports` folder / list the saved ones. |
-| `import run FILE --map NAME --account ACCOUNT [--since D] [--until D] [--confidence F] [--encoding E] [--dry-run]` | Import a statement. Rows a rule matched post, the rest wait as pending, grouped by payee in the answer. Repeats are skipped; the batch is all-or-nothing; a refused row is named by its statement line. An agent must give `--confidence`. |
+| `import run FILE --map NAME --account ACCOUNT [--since D] [--until D] [--confidence F] [--encoding E] [--dry-run]` | Import a statement. Rows a rule matched post, the rest wait as pending, grouped by payee in the answer. A row that looks like an existing entry is held as pending too (`held_for_duplicates`) until `dupes resolve`. Repeats are skipped; the batch is all-or-nothing; a refused row is named by its statement line. An agent must give `--confidence`. |
 | `import rule-add --map NAME --match TEXT (--account ACCOUNT \| --skip) [--field any\|payee\|description] [--regex]` / `import rule-list --map NAME` | Teach or list rules of a mapping (appended, lower priority than existing ones). |
 | `import recheck --map NAME [--dry-run]` | After adding rules, confirm the pending rows of that mapping that now match. |
 | `reconcile ACCOUNT FILE --map NAME` / `reconcile ACCOUNT --from-json FILE\|-` | Compare a statement with the ledger: missing, extra, different amounts, possible double charges, closing balance. Options: `--since`, `--until`, `--tolerance-days N` (default 3), `--closing-balance X --closing-date D` or `--closing-from-statement`, `--assert` (seal a clean result; locks the period). Changes nothing unless `--assert`. |
 | `query "SELECT ..." [--limit N]` | One read-only statement against the SQLite cache. See `sql.md`. |
-| `check` | Replay the whole ledger and re-verify every assertion. |
+| `dupes list [--window N]` | Read-only (plain `dupes` does the same). Possible duplicate payments across sources: each pair with its `tier` (`likely` / `possible`), the evidence, and which one to keep if they are the same. Held statement rows are marked. Never decides; ask the user. |
+| `dupes resolve ID1 ID2 (--same --keep ID \| --different) [--user-said TEXT]` | Record the user's answer. `--same` voids the other one (nothing is deleted); `--different` is remembered and releases a held row into the books. An agent must pass `--user-said`. |
+| `verify` | Check the ledger's hash chain: finds events edited, removed or added by hand. Prints the chain head. Exit code 1 if something does not match. |
+| `check` | Replay the whole ledger, re-verify every assertion and the hash chain. |
 | `doctor` | Install and ledger health, plus settings (tone, base currency, threshold, pending count). A missing ledger is not an error. |

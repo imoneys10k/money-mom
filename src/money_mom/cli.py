@@ -22,6 +22,7 @@ from . import __version__
 from .cache import open_cache, run_query
 from .currency import choose_currency, parse_currency, parse_money
 from .doctor import run_doctor
+from .dupes import DEFAULT_WINDOW_DAYS, candidates_involving, find_candidates, resolve_pair
 from .errors import LedgerError
 from .events import ROOTS
 from .intents import SPECS, postings_with_slots, record_exchange, record_intent, resolve_account
@@ -222,6 +223,11 @@ def cmd_add(args: argparse.Namespace) -> tuple[Any, str]:
     written = ledger.append_many(events, clamp_ts=True)
     data = [_txn_summary(ledger, e.id) for e in written]
     lines = [f"Recorded {d['status']} transaction {d['id']} dated {d['date']}" for d in data]
+    hints = _dupe_hint(ledger, [e.id for e in written])
+    if hints:
+        for d in data:
+            d["duplicate_candidates"] = [h for h in hints if d["id"] in h["ids"]]
+        lines += ["  This may duplicate something already recorded:"] + _dupe_lines(hints) + [_DUPE_HOW]
     return data, "\n".join(lines)
 
 
@@ -301,7 +307,13 @@ def _intent_handler(kind: str) -> Callable[[argparse.Namespace], tuple[Any, str]
             confidence=args.confidence, source=_source(args), import_hash=args.import_hash,
             actor=_actor(args), strict=args.strict, dry_run=args.dry_run, meta=_override_meta(args),
         )
-        return result.to_dict(), _intent_text(result)
+        data, text = result.to_dict(), _intent_text(result)
+        if result.written:
+            hints = _dupe_hint(ledger, [result.event.id])
+            if hints:
+                data["duplicate_candidates"] = hints
+                text += "\n  This may duplicate something already recorded:\n" + "\n".join(_dupe_lines(hints)) + "\n" + _DUPE_HOW
+        return data, text
 
     return handler
 
@@ -430,6 +442,16 @@ def _import_text(data: dict[str, Any]) -> str:
     if skipped:
         lines.append("  not imported: " + ", ".join(skipped))
     lines += [f"    e.g. {example}" for example in data["ignored_examples"]]
+    if data["held_for_duplicates"]:
+        lines.append(
+            f"  {data['held_for_duplicates']} row(s) look like payments the ledger already has, so they are held as pending "
+            "(not counted in any balance) until the user says whether each is the same payment:"
+        )
+        for row in data["possible_duplicates"][:10]:
+            other = row["matches"][0]
+            label = row["payee"] or row["description"] or ""
+            lines.append(f"    [{row['tier']}] line {row['line']}  {row['date']}  {row['amount']}  {label}  ~  {other['id']} ({other['account']}, {other['source']})")
+        lines.append("  Run `money-mom dupes`, show them to the user, then record their answer with `money-mom dupes resolve`.")
     if data["unresolved_payees"]:
         lines.append("  Ask the user a category for these payees; each answer becomes a rule:")
         lines += [f"    {u['payee']}  x{u['count']}  ({u['total']})" for u in data["unresolved_payees"][:10]]
@@ -566,7 +588,7 @@ def cmd_reconcile(args: argparse.Namespace) -> tuple[Any, str]:
 
 def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
-    problems = ledger.check()
+    problems = ledger.check() + list(ledger.state.chain_problems)
     state = ledger.state
     data = {
         "ok": not problems,
@@ -855,7 +877,7 @@ def cmd_pending(args: argparse.Namespace) -> tuple[Any, str]:
                 "id": rec.id, "date": rec.date.isoformat(), "payee": ev.payee, "narration": ev.narration,
                 "postings": _postings_json(rec.postings), "confidence": ev.confidence,
                 "source": ev.source, "actor": f"{ev.actor_type}:{ev.actor_name}",
-                "intent": ev.meta.get("intent"),
+                "intent": ev.meta.get("intent"), "held_for_duplicate_review": ev.meta.get("held") == "duplicate_review",
             }
         )
     if not items:
@@ -864,12 +886,86 @@ def cmd_pending(args: argparse.Namespace) -> tuple[Any, str]:
     for it in items:
         label = it["payee"] or it["narration"] or it["intent"] or ""
         conf = "" if it["confidence"] is None else f"  confidence {it['confidence']}"
-        lines.append(f"{it['id']}  {it['date']}  {label}{conf}")
+        held = "  (looks like a duplicate: see `money-mom dupes`)" if it["held_for_duplicate_review"] else ""
+        lines.append(f"{it['id']}  {it['date']}  {label}{conf}{held}")
         lines += [
             f"    {_ljust(p['account'] or '?', 28)} {_rjust(p['amount'], 12)} {p['ccy']}"
             for p in it["postings"]
         ]
     return items, "\n".join(lines)
+
+
+def _dupe_hint(ledger: Ledger, ids: list[str]) -> list[dict[str, Any]]:
+    """Unjudged duplicate candidates that involve any of these just-written transactions."""
+    wanted = set(ids)
+    return [c.json() for c in find_candidates(ledger.state, ledger.aliases())
+            if c.a.id in wanted or c.b.id in wanted]
+
+
+def _dupe_lines(items: list[dict[str, Any]]) -> list[str]:
+    lines = []
+    for c in items:
+        a, b = c["a"], c["b"]
+        lines.append(f"  [{c['tier']}] {a['amount']} {a['ccy']}, {c['days_apart']} day(s) apart")
+        for tag, side in (("A", a), ("B", b)):
+            label = side["payee"] or side["narration"] or ""
+            held = "  (held: waiting for your answer)" if side["held_for_review"] else ""
+            lines.append(f"      {tag} {side['id']}  {side['date']}  {side['account']}  {label}  [{side['status']}, {side['source']}]{held}")
+        lines.append(f"      evidence: {', '.join(c['evidence'])}")
+        lines.append(f"      if the same payment, keep {c['suggest_keep']}")
+    return lines
+
+
+_DUPE_HOW = (
+    "Show these to the user and let them decide; never decide for them. Their answer:\n"
+    "  same payment:  money-mom dupes resolve A_ID B_ID --same --keep ID --user-said \"...\"\n"
+    "  two payments:  money-mom dupes resolve A_ID B_ID --different --user-said \"...\""
+)
+
+
+def cmd_dupes(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    window = getattr(args, "window", None) or DEFAULT_WINDOW_DAYS
+    action = getattr(args, "dupes_command", None) or "list"
+    if action == "resolve":
+        data = resolve_pair(
+            ledger, args.first, args.second, verdict="same" if args.same else "different", keep=args.keep,
+            actor=_actor(args), user_said=args.user_said, window=window, meta=_override_meta(args),
+        )
+        if data["verdict"] == "same":
+            text = f"Recorded: {data['kept']} and {data['voided']} are the same payment; {data['voided']} was voided (nothing is deleted)."
+        else:
+            text = "Recorded: these are two different payments. They will not be asked about again."
+        if data["released"]:
+            text += "\n  Released into the books: " + ", ".join(data["released"])
+        if data["still_asking"]:
+            text += "\n  Still undecided for these transactions:\n" + "\n".join(_dupe_lines(data["still_asking"]))
+        return data, text
+    items = [c.json() for c in find_candidates(ledger.state, ledger.aliases(), window=window)]
+    data = {"count": len(items), "window_days": window, "candidates": items}
+    if not items:
+        return data, "No duplicate candidates: nothing in the ledger looks like the same payment twice."
+    return data, f"{len(items)} possible duplicate(s):\n" + "\n".join(_dupe_lines(items)) + "\n" + _DUPE_HOW
+
+
+def cmd_verify(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    problems = ledger.verify_chain()
+    state = ledger.state
+    data = {
+        "ok": not problems, "events": len(state.events), "chained": state.chained_events,
+        "before_chaining": state.unchained_events if state.chained_events else len(state.events) and state.unchained_events,
+        "head": state.chain_head,
+        "problems": [{"code": p.code, "message": p.message, "event_id": p.event_id} for p in problems],
+    }
+    lines = [
+        f"{'OK' if not problems else 'TAMPERING OR EDITS FOUND'}: {data['events']} events, {data['chained']} chained"
+        + (f", {data['before_chaining']} written before chaining began (not protected)" if data["before_chaining"] else ""),
+        f"  head {state.chain_head}",
+        "  (write the head down somewhere else if you want to be able to prove later that nothing at the end was cut off)",
+    ]
+    lines += [f"  [{p['code']}] {p['message']}" for p in data["problems"]]
+    return data, "\n".join(lines)
 
 
 def cmd_accounts(args: argparse.Namespace) -> tuple[Any, str]:
@@ -1138,6 +1234,24 @@ def _build_parser() -> argparse.ArgumentParser:
     command("pending", cmd_pending, "list transactions waiting for confirmation")
     command("accounts", cmd_accounts, "list accounts")
 
+    p = command("dupes", cmd_dupes, "possible duplicate payments across sources (list), and record the user's answer (resolve)")
+    p.add_argument("--window", type=int, help=f"days apart that still count as the same time (default {DEFAULT_WINDOW_DAYS})")
+    dsub = p.add_subparsers(dest="dupes_command", metavar="ACTION")
+    q = dsub.add_parser("list", parents=[common], help="list unjudged candidates (the default)")
+    q.add_argument("--window", type=int)
+    q = dsub.add_parser("resolve", parents=[common], help="record the user's answer for two transactions")
+    q.add_argument("first")
+    q.add_argument("second")
+    group = q.add_mutually_exclusive_group(required=True)
+    group.add_argument("--same", action="store_true", help="they are the same payment: one is voided (nothing is deleted)")
+    group.add_argument("--different", action="store_true", help="they are two payments: remembered, never asked again")
+    q.add_argument("--keep", help="with --same: the id to keep (the other is voided)")
+    q.add_argument("--user-said", metavar="TEXT", help="an agent must pass what the user answered")
+    q.add_argument("--window", type=int)
+    lock_flag(q)
+
+    p = command("verify", cmd_verify, "check the ledger's hash chain: finds events that were edited, removed, reordered or added by hand")
+
     p = command("show", cmd_show, "show a transaction or assertion with all events that touch it")
     p.add_argument("id")
 
@@ -1166,7 +1280,7 @@ def main(argv: list[str] | None = None) -> int:
         if not hasattr(args, name):
             setattr(args, name, False if name == "json" else None)
     for name in ("date", "status", "narration", "payee", "import_hash", "confidence", "source_type",
-                 "source_ref", "source_sha256", "from_json", "override_lock", "currency", "posting"):
+                 "source_ref", "source_sha256", "from_json", "override_lock", "currency", "posting", "window", "user_said", "keep"):
         if not hasattr(args, name):
             setattr(args, name, None)
     try:
@@ -1179,7 +1293,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {err}", file=sys.stderr)
         return 2 if err.code == "usage_error" else 1
     print(_dump({"ok": True, "data": data}) if args.json else text)
-    if args.command in ("check", "doctor") and not data["ok"]:
+    if args.command in ("check", "doctor", "verify") and not data["ok"]:
         return 1
     return 0
 

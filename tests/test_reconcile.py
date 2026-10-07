@@ -332,8 +332,12 @@ class Cli(CliTestCase):
     def test_missing_rows_can_be_imported_and_the_result_is_clean(self):
         self.js("spend", "68", "--from", "银行卡", "--category", "订阅", "--payee", "Netflix", "--date", "2026-09-03")
         self.assertFalse(self.reconcile()["data"]["clean"])
-        self.js("import", "run", str(self.csv), "--map", "cmb", "--account", "银行卡")
-        # the hand-written Netflix entry and the imported one are now both in the ledger: the extra one shows up
+        imported = self.js("import", "run", str(self.csv), "--map", "cmb", "--account", "银行卡")["data"]
+        # the imported Netflix row looks like the hand-written entry, so it waits for the user instead of being booked twice
+        self.assertEqual(imported["held_for_duplicates"], 1)
+        pair = self.js("dupes")["data"]["candidates"][0]["ids"]
+        self.js("dupes", "resolve", *pair, "--different")  # the user says: two separate payments
+        # both are in the ledger now: the extra one shows up
         again = self.reconcile("--closing-from-statement")["data"]
         self.assertEqual(len(again["missing_in_statement"]), 1)
 

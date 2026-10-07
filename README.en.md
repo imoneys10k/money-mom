@@ -24,7 +24,7 @@ Money Mom is a **bookkeeping skill** for AI agents (Claude Code, Codex, Cursor, 
 
 It is not another budgeting app. It makes AI bookkeeping **trustworthy**: the AI only understands what you said, and **a program keeps and checks the books**.
 
-> **Status: pre-alpha (`0.1.0a4`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a4"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
+> **Status: pre-alpha (`0.1.0a5`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a5"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
 
 ## One-sentence install
 
@@ -62,6 +62,8 @@ Mom   612 more than last month, mostly one 486 dinner on the 20th. Every number 
 | **The AI never writes the books** | The AI says "spent 38, from Alipay, on coffee"; direction, checks and writing are done by a program. |
 | **Append-only** | A mistake is voided and re-recorded, never erased. Every entry keeps its source, confidence and author. |
 | **Never guesses** | Account names resolve only by full name, alias or a unique match; anything vague becomes *pending* with candidates listed. An AI confidence below 0.9 also waits. |
+| **The same payment is never booked twice** | When one payment arrives from two sources (a WeChat statement, a bank statement, something you told the AI), the program finds the candidates and shows the evidence; **you decide** whether they are the same. A statement row it is unsure about is held back and counts in no balance. |
+| **Tamper-evident** | Every event carries a hash of everything before it; an event that was edited, removed or slipped in by hand is found by `money-mom verify`. |
 | **Locked after reconciling** | A period you checked against the bank is locked; only you can change it, with a written reason. |
 | **Local-first** | Your data stays on your machine as human-readable text; the program does not use the network by default and has no runtime dependencies. The one exception is `rates update`, which you run yourself to fetch exchange rates; it sends only currency codes and a date, never an amount or an account. |
 
@@ -100,6 +102,8 @@ money-mom balance                                  # exact balances
 money-mom report --month 2026-09                   # monthly report: income, spending by category, vs last month, net worth
 money-mom chart                                    # a one-page chart sheet (HTML)
 money-mom alerts                                   # recurring charges and anomaly alerts
+money-mom dupes                                    # payments that may be recorded twice, waiting for you
+money-mom verify                                   # has the ledger been changed behind your back?
 money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
@@ -121,10 +125,29 @@ money-mom reconcile checking cmb-sep.csv --map cmb --closing-from-statement --as
 ```
 
 - **No built-in bank presets.** Export layouts change often, and a preset without real samples would be made up. `import inspect` helps you (or your agent) write the mapping and asks about what it cannot know, such as whether a date is day-first or which sign means money in.
-- **Alipay and WeChat Pay have draft mappings, not verified against a real export.** They are in [`skills/money-mom/references/mappings/`](skills/money-mom/references/mappings/), written from memory of those two layouts, and are only a starting point: compare them with your own file using `import inspect`, fix the mapping if the header differs, then spot-check a few rows with `--dry-run`. If the header does not match, the import refuses rather than writing wrong entries; each draft says so at the top, and also what it does not handle (for example, a row paid by a bank card also appears on that bank's statement, so import it from one side only).
+- **The Alipay mapping is a draft, not verified against a real export; the WeChat Pay mapping was checked against one real export.** Both are in [`skills/money-mom/references/mappings/`](skills/money-mom/references/mappings/) and are only a starting point: compare them with your own file using `import inspect`, fix the mapping if the header differs, then spot-check a few rows with `--dry-run`. If the header does not match, the import refuses rather than writing wrong entries. `.xlsx` statements (WeChat's default export) are read directly. The WeChat mapping skips rows paid by a bank or credit card, because those also appear on the card's own statement and importing both would record them twice; each file says at the top what it does not handle.
 - **Re-importing is safe.** Every row has a stable hash, so rows already in the ledger are skipped; the batch is all-or-nothing, and a refused row is named by its statement line.
 - **Ask once, learn once.** Rows no rule matched are held as pending, grouped by payee; one answer becomes a rule and `recheck` settles the waiting history.
 - **Reconciliation finds missing and extra entries, amounts that disagree and charges that may have been taken twice**, and checks the closing balance; only a fully matching result can be sealed. A PDF statement is read by the agent and handed over as JSON; the program itself does not parse PDFs.
+
+## The same payment is never booked twice
+
+One payment often reaches the books twice: once from a WeChat statement and once from the bank's, or once told to the AI and once in a statement. Importing the same *file* again is already safe; this is about duplicates **between sources**.
+
+```bash
+money-mom dupes                                          # undecided candidates, each with its evidence
+money-mom dupes resolve ID1 ID2 --same --keep ID1        # you say "same payment": the other is voided (not deleted) and remembered
+money-mom dupes resolve ID1 ID2 --different              # you say "two payments": remembered, never asked again; a held row goes into the books
+```
+
+- **The program finds candidates and never decides.** Amount, currency and direction must be identical and the dates close (within two days by default). Then the evidence: the payment method on a statement row points at the other entry's account (a WeChat row says "招商银行信用卡(1234)" and you gave that card an alias containing 1234), the payee or description matches, or a hand entry and a statement row fall on the same day in the same account. Strong evidence is `likely`; equal amounts alone are `possible`.
+- **A statement row it is unsure about is held.** On import, a row that looks like an existing entry is recorded as *pending* (in no balance) until you answer: "same payment" voids it, "two payments" books it. A voided row does not come back when the same statement is imported again.
+- **An AI must relay your answer** (`--user-said`) or the command is refused. Every judgement is an event in the ledger, so it can be traced and undone.
+- **Not covered:** transfers between your own accounts that appear on both statements; repeated rows inside one file (the row hash already handles those).
+
+## Tamper-evident
+
+The ledger is append-only text, but anyone can edit a file. So every event carries a hash derived from all events before it; `money-mom verify` (also part of `check` and `doctor`) finds an event that was edited, removed or added by hand. This is **detection**, not prevention: someone who recomputes every later hash is not caught. That is why `verify` prints the chain head: note it somewhere else and a cut-off tail shows up later. It all happens locally, with no network. Events written before this version are covered from the next write on.
 
 ## Monthly report and charts
 
@@ -187,8 +210,8 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · on PyPI · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | "Mom" tone levels · verify the Alipay and WeChat draft mappings against real exports, then promote them |
+| Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · `.xlsx` statements read directly · duplicates across sources (candidates, held rows, you decide) · hash chain (`verify`) · on PyPI · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Next | "Mom" tone levels · verify the Alipay mapping against a real export, and WeChat against more samples · spotting the same transfer on both of your own accounts |
 | Later | npm launcher · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.

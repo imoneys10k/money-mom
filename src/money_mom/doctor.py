@@ -59,6 +59,14 @@ def run_doctor(root: Path) -> dict[str, Any]:
         "all live balance assertions hold" if not problems else "; ".join(p.message for p in problems),
     )
 
+    chain = state.chain_problems
+    check(
+        "chain",
+        not chain,
+        (f"{state.chained_events} events chained, none changed since" + (f"; {state.unchained_events} older ones are not protected" if state.unchained_events and state.chained_events else ""))
+        if not chain else f"{len(chain)} event(s) changed after they were written; run `money-mom verify`",
+    )
+
     probe = ledger.ledger_dir / f".doctor-{os.getpid()}"
     try:
         probe.write_text("x", encoding="utf-8")

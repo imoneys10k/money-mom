@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "money-mom"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "Money Mom: an append-only, double-entry ledger engine and skill for AI agents. Local-first, never guesses."
 readme = "README.pypi.md"
 license = "MIT"

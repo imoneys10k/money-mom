@@ -19,6 +19,8 @@ import json
 import re
 import tomllib
 import unicodedata
+import xml.etree.ElementTree as ET
+import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -26,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .currency import choose_currency
+from .dupes import HELD, Item, candidates_for_probe, candidates_involving, find_candidates
 from .errors import LedgerError
 from .events import ROOTS, check_currency
 from .intents import resolve_account
@@ -73,11 +76,12 @@ class Mapping:
     direction_in: tuple[str, ...]
     direction_out: tuple[str, ...]
     direction_ignore: tuple[str, ...]
-    skip_when: tuple[tuple[str, tuple[str, ...]], ...]
+    # (column, exact values, pattern): a row is dropped when its cell is one of the values or the pattern is found in it
+    skip_when: tuple[tuple[str, tuple[str, ...], re.Pattern[str] | None], ...]
     rules: tuple[Rule, ...] = field(default_factory=tuple)
 
 
-_COLUMN_KEYS = {"date", "amount", "amount_in", "amount_out", "payee", "description", "id", "direction", "balance"}
+_COLUMN_KEYS = {"date", "amount", "amount_in", "amount_out", "payee", "description", "id", "direction", "balance", "via"}
 
 
 def _strs(value: Any, label: str) -> tuple[str, ...]:
@@ -132,12 +136,26 @@ def parse_mapping(text: str, name: str = "mapping") -> Mapping:
 
     skips = []
     for index, item in enumerate(data.get("skip", [])):
+        label = f"skip #{index + 1}"
         if not isinstance(item, dict):
-            raise _bad(f"skip #{index + 1} must be a table with `column` and `values`")
-        _unknown(item, {"column", "values"}, f"skip #{index + 1}")
+            raise _bad(f"{label} must be a table with `column` and `values` or `regex`")
+        _unknown(item, {"column", "values", "regex"}, label)
         if not isinstance(item.get("column"), str):
-            raise _bad(f"skip #{index + 1} needs a `column`")
-        skips.append((_cell(item["column"]), tuple(_cell(v) for v in _strs(item.get("values"), f"skip #{index + 1} values"))))
+            raise _bad(f"{label} needs a `column`")
+        if ("values" in item) == ("regex" in item):
+            raise _bad(f"{label} needs exactly one of `values` (exact cell values) or `regex` (a pattern to find in the cell)")
+        values: tuple[str, ...] = ()
+        pattern = None
+        if "values" in item:
+            values = tuple(_cell(v) for v in _strs(item["values"], f"{label} values"))
+        else:
+            if not isinstance(item["regex"], str) or not item["regex"]:
+                raise _bad(f"{label}: `regex` must be a non-empty string")
+            try:
+                pattern = re.compile(item["regex"], re.IGNORECASE)
+            except re.error as err:
+                raise _bad(f"{label}: `regex` is not a valid regular expression: {err}") from None
+        skips.append((_cell(item["column"]), values, pattern))
 
     rules = []
     for index, item in enumerate(data.get("rules", [])):
@@ -270,6 +288,7 @@ class StatementRow:
     id: str
     balance: Decimal | None
     raw: dict[str, str]
+    via: str = ""  # the payment method the statement names (微信's 支付方式), a hint for duplicate detection
 
 
 @dataclass
@@ -295,6 +314,133 @@ def _decode(data: bytes, forced: str | None) -> tuple[str, str]:
         f"cannot decode the file as {forced or ' or '.join(ENCODINGS)}; give the right one with --encoding",
         code="invalid_statement",
     )
+
+
+def _skipped(cell: str, values: tuple[str, ...], pattern: re.Pattern[str] | None) -> bool:
+    return cell in values or (pattern is not None and pattern.search(cell) is not None)
+
+
+# ---------------------------------------------------------------- .xlsx files (read with the standard library)
+
+_XLSX_MAX_BYTES = 64 * 1024 * 1024  # uncompressed size of any part we read
+_SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_BUILTIN_DATE_FORMATS = set(range(14, 23)) | {27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 45, 46, 47, 50, 51, 52, 53, 54, 55, 56, 57, 58}
+
+
+def _is_xlsx(data: bytes, path: Path) -> bool:
+    return data[:4] == b"PK\x03\x04" and path.suffix.lower() in (".xlsx", ".xlsm")
+
+
+def _xlsx_part(archive: zipfile.ZipFile, name: str) -> ET.Element:
+    info = archive.getinfo(name)
+    if info.file_size > _XLSX_MAX_BYTES:
+        raise LedgerError(f"the spreadsheet part {name} is too large to read", code="invalid_statement")
+    raw = archive.read(name)
+    if b"<!DOCTYPE" in raw[:2048].upper() or b"<!ENTITY" in raw[:2048].upper():
+        raise LedgerError(f"the spreadsheet part {name} declares entities; refusing to read it", code="invalid_statement")
+    return ET.fromstring(raw)
+
+
+def _xlsx_column(ref: str) -> int:
+    letters = re.match(r"[A-Z]+", ref)
+    if not letters:
+        raise ValueError(ref)
+    n = 0
+    for ch in letters.group(0):
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def _date_format_kind(code: str) -> str | None:
+    """"datetime" or "date" for a number format that shows dates, None for anything else."""
+    bare = re.sub(r'"[^"]*"|\[[^\]]*\]|\\.', "", code)
+    has_time = re.search(r"[hs]", bare, re.IGNORECASE) is not None
+    if not has_time and re.search(r"[ydm]", bare, re.IGNORECASE) is None:
+        return None
+    return "datetime" if has_time else "date"
+
+
+def _xlsx_to_text(data: bytes) -> str:
+    """The first worksheet of an .xlsx as CSV text. Cell values come out as Excel shows them where it matters:
+    date cells become `YYYY-MM-DD HH:MM:SS` (or just the date); numbers keep their exact stored digits
+    (never a float round trip); everything else is text. Row numbers are kept, so a "line" in an error is the
+    row number in the spreadsheet."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+        ns = {"m": _SHEET_NS}
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            for item in _xlsx_part(archive, "xl/sharedStrings.xml").findall("m:si", ns):
+                shared.append("".join(t.text or "" for t in item.iter(f"{{{_SHEET_NS}}}t")))
+        date_styles: dict[int, str] = {}
+        if "xl/styles.xml" in archive.namelist():
+            styles = _xlsx_part(archive, "xl/styles.xml")
+            custom = {int(f.get("numFmtId")): f.get("formatCode", "") for f in styles.iterfind("m:numFmts/m:numFmt", ns)}
+            for index, xf in enumerate(styles.iterfind("m:cellXfs/m:xf", ns)):
+                fmt = int(xf.get("numFmtId", "0"))
+                if fmt in custom:
+                    kind = _date_format_kind(custom[fmt])
+                elif fmt in _BUILTIN_DATE_FORMATS:
+                    kind = "date" if fmt in (14, 15, 16, 17, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 50, 51, 52, 53, 54, 55, 56, 57, 58) else "datetime"
+                else:
+                    kind = None
+                if kind:
+                    date_styles[index] = kind
+        workbook = _xlsx_part(archive, "xl/workbook.xml")
+        first = workbook.find("m:sheets/m:sheet", ns)
+        if first is None:
+            raise LedgerError("the spreadsheet has no sheets", code="invalid_statement")
+        target = "xl/worksheets/sheet1.xml"
+        if "xl/_rels/workbook.xml.rels" in archive.namelist():
+            wanted = first.get(f"{{{_REL_NS}}}id")
+            for rel in _xlsx_part(archive, "xl/_rels/workbook.xml.rels").iter(f"{{{_PKG_REL_NS}}}Relationship"):
+                if rel.get("Id") == wanted:
+                    path = rel.get("Target", "")
+                    target = path.lstrip("/") if path.startswith("/") else "xl/" + path
+        sheet = _xlsx_part(archive, target)
+    except (zipfile.BadZipFile, KeyError, ET.ParseError, ValueError) as err:
+        raise LedgerError(f"cannot read the spreadsheet: {err}", code="invalid_statement") from None
+
+    table: dict[int, list[str]] = {}
+    for row in sheet.iter(f"{{{_SHEET_NS}}}row"):
+        cells: dict[int, str] = {}
+        for c in row.findall("m:c", ns):
+            v = c.find("m:v", ns)
+            kind = c.get("t")
+            if kind == "s" and v is not None:
+                text = shared[int(v.text)]
+            elif kind == "inlineStr":
+                text = "".join(t.text or "" for t in c.iter(f"{{{_SHEET_NS}}}t"))
+            else:
+                text = (v.text or "") if v is not None else ""
+                shows = date_styles.get(int(c.get("s", "0")))
+                if text and kind in (None, "n") and shows:
+                    try:
+                        moment = _dt.datetime(1899, 12, 30) + _dt.timedelta(seconds=round(float(text) * 86400))
+                    except (ValueError, OverflowError):
+                        moment = None
+                    if moment is not None:  # a cell formatted with a time always shows it, even at midnight
+                        text = moment.strftime("%Y-%m-%d %H:%M:%S" if shows == "datetime" else "%Y-%m-%d")
+            cells[_xlsx_column(c.get("r", "A1"))] = text
+        if cells:
+            number = int(row.get("r", len(table) + 1))
+            table[number] = [cells.get(i, "") for i in range(max(cells) + 1)]
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    for number in range(1, max(table, default=0) + 1):
+        writer.writerow(table.get(number, []))
+    return out.getvalue()
+
+
+def _read_text(path: Path, forced: str | None) -> tuple[bytes, str, str]:
+    """(raw bytes, text, encoding label) for a CSV-like file or an .xlsx workbook."""
+    data = path.read_bytes()
+    if _is_xlsx(data, path):
+        return data, _xlsx_to_text(data), "xlsx"
+    text, used = _decode(data, forced)
+    return data, text, used
 
 
 def _cell(value: str | None) -> str:
@@ -351,8 +497,7 @@ def _reader(text: str, delimiter: str) -> list[tuple[int, list[str]]]:
 
 
 def read_statement(path: Path, mapping: Mapping, *, encoding: str | None = None) -> ParsedStatement:
-    data = path.read_bytes()
-    text, used = _decode(data, encoding or mapping.encoding)
+    data, text, used = _read_text(path, encoding or mapping.encoding)
     wanted = [h for h in mapping.header if h]
     chosen = None
     for delimiter in ([mapping.delimiter] if mapping.delimiter else list(DELIMITERS)):
@@ -393,7 +538,7 @@ def read_statement(path: Path, mapping: Mapping, *, encoding: str | None = None)
                 examples.append(f"line {line}: {filled[0]}")
             continue
         record = dict(zip(header, cells + [""] * (len(header) - len(cells))))
-        if any(_cell(record.get(c)) in values for c, values in mapping.skip_when):
+        if any(_skipped(_cell(record.get(c)), values, pattern) for c, values, pattern in mapping.skip_when):
             ignored["skipped by [[skip]]"] += 1
             continue
         if not at(record, "date"):
@@ -433,7 +578,7 @@ def read_statement(path: Path, mapping: Mapping, *, encoding: str | None = None)
             ignored["zero amount"] += 1
             continue
         parsed.append(StatementRow(line, day, value, at(record, "payee"), at(record, "description"),
-                                   at(record, "id"), balance, record))
+                                   at(record, "id"), balance, record, at(record, "via")))
     if problems:
         shown = problems[:10]
         raise LedgerError(
@@ -520,19 +665,20 @@ def run_import(
     statement_account = _statement_account(ledger, account, when)
     ccy = _statement_currency(ledger, mapping, statement_account)
     live = ledger.state.live_import_hashes()
+    judged_same = ledger.state.duplicate_import_hashes()  # rows a person already said were another payment
     hashes = row_hashes(parsed.rows, statement_account, ccy)
     aliases = ledger.aliases()
     source = {"type": "import", "ref": parsed.filename, "sha256": parsed.sha256}
 
     ignored = Counter(parsed.ignored)
     duplicates = out_of_range = 0
-    events, planned = [], []
+    events, planned, held_rows = [], [], []
     unresolved: dict[str, dict[str, Any]] = {}
     for row, digest in zip(parsed.rows, hashes):
         if (since and row.date < since) or (until and row.date > until):
             out_of_range += 1
             continue
-        if digest in live:
+        if digest in live or digest in judged_same:
             duplicates += 1
             continue
         rule = match_rule(mapping, row)
@@ -548,6 +694,12 @@ def run_import(
                 note = f"rule {rule.text!r}: {res.message}"
         label = row.payee or row.description or "(no payee)"
         status = "posted" if counter and not low_confidence else "pending"
+        probe = Item(
+            id=None, date=row.date, account=statement_account, amount=row.amount, ccy=ccy, payee=row.payee,
+            narration=row.description, origin=("import", parsed.sha256), via=row.via, status="pending", held=False,
+            has_hash=True, source=f"import:{parsed.filename}",
+        )
+        matches = candidates_for_probe(ledger.state, aliases, probe)
         if not counter:
             slot = unresolved.setdefault(label, {"payee": label, "count": 0, "total": Decimal(0), "why": note})
             slot["count"] += 1
@@ -556,7 +708,17 @@ def run_import(
             {"account": statement_account, "amount": _fmt(row.amount), "ccy": ccy},
             {"account": counter, "amount": _fmt(-row.amount), "ccy": ccy},
         ]
-        meta = {"import": {"mapping": mapping.name, "line": row.line, "file": parsed.filename}}
+        meta: dict[str, Any] = {"import": {"mapping": mapping.name, "line": row.line, "file": parsed.filename}}
+        if row.via:
+            meta["import"]["via"] = row.via
+        if matches:  # the row looks like a payment the ledger already has: hold it until a person says
+            status = "pending"
+            meta["held"] = HELD
+            held_rows.append({
+                "line": row.line, "date": row.date.isoformat(), "amount": _fmt(row.amount), "payee": row.payee or None,
+                "description": row.description or None, "tier": matches[0].tier, "evidence": list(matches[0].evidence),
+                "matches": [(m.a if m.b is probe else m.b).json() for m in matches][:3],
+            })
         events.append(ledger.new_event(
             "txn", actor=actor, source=source, confidence=confidence, meta=meta, date=row.date.isoformat(),
             status=status, postings=postings, payee=row.payee or None, narration=row.description or None,
@@ -590,6 +752,8 @@ def run_import(
         )[:25],
         "written": written, "dry_run": dry_run,
         "held_for_confidence": low_confidence,
+        "held_for_duplicates": len(held_rows),
+        "possible_duplicates": held_rows[:25],
     }
 
 
@@ -598,11 +762,14 @@ def recheck(ledger: Ledger, name: str, *, actor: tuple[str, str] = ("human", "us
     mapping = load_mapping(ledger, name)
     ledger.reload()
     aliases = ledger.aliases()
+    waiting_for_judgement = find_candidates(ledger.state, aliases)
     events, resolved, left = [], 0, {}
     for rec in ledger.state.pending():
         info = rec.event.meta.get("import")
         if not isinstance(info, dict) or info.get("mapping") != mapping.name:
             continue
+        if rec.event.meta.get("held") == HELD and candidates_involving(waiting_for_judgement, rec.id):
+            continue  # a person has not yet said whether this is a duplicate; a rule must not decide that
         missing = [i for i, p in enumerate(rec.postings) if p.account is None]
         if len(missing) != 1:
             continue
@@ -652,8 +819,7 @@ def _looks_numeric(cell: str) -> bool:
 
 
 def inspect_statement(path: Path, *, encoding: str | None = None, sample: int = 6) -> dict[str, Any]:
-    data = path.read_bytes()
-    text, used = _decode(data, encoding)
+    data, text, used = _read_text(path, encoding)
     best = None
     for delimiter in DELIMITERS:
         rows = _reader(text, delimiter)[:80]

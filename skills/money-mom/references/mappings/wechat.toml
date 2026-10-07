@@ -1,18 +1,24 @@
-# DRAFT, NOT VERIFIED AGAINST A REAL EXPORT. 草案：未经真实导出文件验证。
+# Checked against one real WeChat Pay export (微信支付账单明细, .xlsx, 2026-09, 149 rows): the header, columns,
+# date format and totals matched. 已用一份真实导出（.xlsx，149 笔）核对过表头、列、日期格式与汇总。
+# It is still only one sample, and layouts change: on a new file run `money-mom import inspect FILE` first. If the
+# header differs from [columns] below, fix this mapping first. Always run `import run --dry-run` and check a few
+# rows by hand.
 #
-# WeChat Pay 账单 CSV (微信支付账单明细), as remembered, not as tested on a file. WeChat exports an .xlsx by
-# default: open it and save as CSV (UTF-8) first, or ask the user to export the CSV version if offered.
-# Before using it: run `money-mom import inspect FILE` on the user's own export. If the header differs from
-# [columns] below, fix this mapping first. Always run `import run --dry-run` and check a few rows by hand.
+# WeChat exports an .xlsx; `money-mom import` reads it directly (first sheet, dates as `YYYY-MM-DD HH:MM:SS`).
+# A CSV saved from it also works.
 #
 # What it does:
-#   - amounts such as "¥38.00" are read; 收/支 = "/" (neutral: wallet top-up, withdrawal, own transfers) is ignored
+#   - amounts such as "¥38.00" or a plain 38.5 are read; 收/支 = "/" (neutral: wallet top-up, withdrawal, own
+#     transfers) is ignored
 #   - any other 收/支 value stops the import and names the line; nothing is half-imported
+#   - rows paid by a bank card or credit card (支付方式 ending in "(1234)") are SKIPPED: those payments also
+#     appear on the card's own statement, and importing both would record them twice. Import this file into the
+#     WeChat wallet account (零钱) only; import the card statements for the cards. Rows paid from 零钱 and rows
+#     with 支付方式 "/" (red packets and transfers received, which land in 零钱) are kept.
+#     To import everything instead, delete the [[skip]] block below, and then handle the double counting yourself.
 # What it does NOT do:
 #   - refunds: an order that shows 已全额退款 is kept as a payment, and its refund appears as a separate 收入 row.
-#     Both are imported, so they net to zero; do not skip only one of them.
-#   - it knows nothing about which card paid (支付方式). A row paid by a bank card also appears on that bank's
-#     statement: import it from one side only (rule-add --skip), or it is recorded twice.
+#     Both are imported, so they net to zero. Both rows carry the same 支付方式, so the card skip drops both or neither.
 #   - it assigns no categories. Rows with no rule wait as pending, grouped by payee; teach rules with `rule-add`.
 #
 # Save with:  money-mom import save-map wechat - < wechat.toml
@@ -25,6 +31,7 @@ direction = "收/支"
 payee = "交易对方"
 description = "商品"
 id = "交易单号"
+via = "支付方式"            # payment method: lets duplicate detection link a row to the card that paid it
 
 [format]
 date = "%Y-%m-%d %H:%M:%S"
@@ -34,3 +41,8 @@ sign = "unsigned"
 in = ["收入"]
 out = ["支出"]
 ignore = ["/"]
+
+# 支付方式 such as 中国银行储蓄卡(1234) or MASTERCARD(5678): a card, whose own statement is the source of truth
+[[skip]]
+column = "支付方式"
+regex = '\(\d{4}\)$'

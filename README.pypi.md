@@ -31,7 +31,7 @@ Please read https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md and fol
 Or do it yourself. This is a pre-release, so the version is pinned (`pip` and `uv` skip pre-releases otherwise):
 
 ```bash
-uv tool install "money-mom==0.1.0a4"      # or: pipx install "money-mom==0.1.0a4"
+uv tool install "money-mom==0.1.0a5"      # or: pipx install "money-mom==0.1.0a5"
 money-mom doctor
 money-mom init --template en --base-currency USD
 money-mom spend 4.50 --from cash --category coffee

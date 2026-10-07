@@ -16,14 +16,15 @@ from typing import Any
 from .errors import ValidationError
 
 SCHEMA_VERSION = 1
-KINDS = ("open", "close", "txn", "confirm", "void", "assert", "price")
+KINDS = ("open", "close", "txn", "confirm", "void", "assert", "price", "review")
+VERDICTS = ("same", "different")
 ROOTS = ("Assets", "Liabilities", "Equity", "Income", "Expenses")
 ACTOR_TYPES = ("human", "agent")
 SOURCE_TYPES = ("chat", "file", "screenshot", "import", "manual")
 TXN_STATUSES = ("posted", "pending")
 
 _COMMON_REQUIRED = frozenset({"v", "id", "kind", "ts", "actor"})
-_COMMON_OPTIONAL = frozenset({"source", "confidence", "meta"})
+_COMMON_OPTIONAL = frozenset({"source", "confidence", "meta", "chain"})
 _KIND_REQUIRED = {
     "open": frozenset({"account", "date"}),
     "close": frozenset({"account", "date"}),
@@ -32,6 +33,7 @@ _KIND_REQUIRED = {
     "void": frozenset({"target", "reason"}),
     "assert": frozenset({"date", "account", "amount", "ccy"}),
     "price": frozenset({"date", "base", "quote", "rate"}),
+    "review": frozenset({"targets", "verdict"}),
 }
 _KIND_OPTIONAL = {
     "open": frozenset({"currencies"}),
@@ -41,6 +43,7 @@ _KIND_OPTIONAL = {
     "void": frozenset(),
     "assert": frozenset(),
     "price": frozenset(),
+    "review": frozenset({"keep"}),
 }
 
 _ID_RE = re.compile(r"[0-9A-Za-z_-]{1,64}")
@@ -126,6 +129,17 @@ class Price(Event):
     base: str
     quote: str
     rate: Decimal
+
+
+@dataclass(frozen=True, kw_only=True)
+class Review(Event):
+    """A person's judgement about two transactions: they are the same real-world payment (`same`, and which one
+    to `keep`) or two different ones (`different`, so nobody asks again). Writing it changes nothing by itself;
+    for `same` the dropped one is voided by a separate `void` event written in the same batch."""
+
+    targets: tuple[str, str]
+    verdict: str
+    keep: str | None = None
 
 
 def check_account_name(name: Any, field: str = "account") -> str:
@@ -310,6 +324,9 @@ def _parse(obj: Any) -> Event:
     if missing:
         raise _bad(f"missing field(s) {sorted(missing)} for kind {kind!r}", "missing_field")
 
+    chain = obj.get("chain")
+    if chain is not None and (not isinstance(chain, str) or not _SHA256_RE.fullmatch(chain)):
+        raise _bad("chain must be 64 lowercase hex chars", "invalid_field")
     meta = obj.get("meta", {})
     if not isinstance(meta, dict):
         raise _bad("meta must be an object", "invalid_field")
@@ -382,6 +399,23 @@ def _parse(obj: Any) -> Event:
         if rate <= 0:
             raise _bad("rate must be greater than zero", "invalid_price")
         return Price(**common, date=parse_date(obj["date"]), base=base, quote=quote, rate=rate)
+    if kind == "review":
+        targets = obj["targets"]
+        if not isinstance(targets, list) or len(targets) != 2:
+            raise _bad("targets must be a list of exactly two transaction ids", "invalid_review")
+        pair = (_parse_id(targets[0], "targets[0]"), _parse_id(targets[1], "targets[1]"))
+        if pair[0] == pair[1]:
+            raise _bad("targets must be two different transactions", "invalid_review")
+        verdict = obj["verdict"]
+        if verdict not in VERDICTS:
+            raise _bad(f"verdict must be one of {', '.join(VERDICTS)}", "invalid_review")
+        keep = obj.get("keep")
+        if verdict == "same":
+            if keep not in pair:
+                raise _bad("a `same` verdict must say which of the two to keep (`keep`)", "invalid_review")
+        elif keep is not None:
+            raise _bad("`keep` only makes sense with a `same` verdict", "invalid_review")
+        return Review(**common, targets=pair, verdict=verdict, keep=keep)
     return Assert(
         **common,
         date=parse_date(obj["date"]),

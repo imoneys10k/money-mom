@@ -107,11 +107,16 @@ class Shipped(unittest.TestCase):
             self.assertEqual((mapping.ccy, mapping.sign), ("CNY", "unsigned"))
             self.assertEqual(mapping.rules, ())  # no categories are guessed
 
-    def test_each_draft_says_at_the_very_top_that_it_is_unverified(self):
-        for name in ("alipay", "wechat"):
-            first = (MAPPINGS / f"{name}.toml").read_text(encoding="utf-8").splitlines()[0]
-            self.assertIn("NOT VERIFIED", first)
-            self.assertIn("未经真实导出文件验证", first)
+    def test_the_alipay_draft_says_at_the_very_top_that_it_is_unverified(self):
+        first = (MAPPINGS / "alipay.toml").read_text(encoding="utf-8").splitlines()[0]
+        self.assertIn("NOT VERIFIED", first)
+        self.assertIn("未经真实导出文件验证", first)
+
+    def test_the_wechat_mapping_says_what_it_was_checked_against_and_that_it_is_one_sample(self):
+        text = (MAPPINGS / "wechat.toml").read_text(encoding="utf-8")
+        self.assertNotIn("NOT VERIFIED", text.splitlines()[0])
+        self.assertIn("one real WeChat Pay export", text.splitlines()[0])
+        self.assertIn("only one sample", text)
 
     def test_the_skill_calls_them_drafts(self):
         text = (ROOT / "skills/money-mom/SKILL.md").read_text(encoding="utf-8")
@@ -179,17 +184,30 @@ class WeChat(DraftCase):
         st = read_statement(self.wechat_file(), self.draft("wechat"))
         self.assertEqual(st.encoding, "utf-8-sig")
         self.assertEqual(st.header_line, len(WECHAT_PREAMBLE) + 1)
+        # the card payment (招商银行信用卡) and the card top-up are left to the card's own statement
         self.assertEqual([(r.date, r.amount, r.payee) for r in st.rows], [
-            (dt.date(2026, 9, 3), D("-18.00"), "瑞幸咖啡"),
             (dt.date(2026, 9, 6), D("200.00"), "小王"),
             (dt.date(2026, 9, 7), D("-30.00"), "菜市场"),
             (dt.date(2026, 9, 15), D("-40.00"), "电影院"),
         ])
-        self.assertEqual(st.rows[0].id, "4200000000000000000000000001")
-        self.assertEqual(dict(st.ignored), {"direction '/'": 1})
+        self.assertEqual(st.rows[0].id, "1000000000000000000000000002")
+        self.assertEqual(dict(st.ignored), {"skipped by [[skip]]": 2})
+
+    def test_rows_paid_by_any_card_are_skipped_and_wallet_rows_are_kept(self):
+        rows = [
+            "2026-09-03 12:00:00,商户消费,甲,a,支出,¥1.00,中国银行储蓄卡(3564),支付成功,4200000000000000000000000021\t,M1\t,/",
+            "2026-09-03 12:01:00,商户消费,乙,b,支出,¥2.00,MASTERCARD(2061),支付成功,4200000000000000000000000022\t,M2\t,/",
+            "2026-09-03 12:02:00,商户消费,丙,c,支出,¥3.00,民生银行信用卡(5554),支付成功,4200000000000000000000000023\t,M3\t,/",
+            "2026-09-03 12:03:00,商户消费,丁,d,支出,¥4.00,零钱,支付成功,4200000000000000000000000024\t,M4\t,/",
+            "2026-09-03 12:04:00,商户消费,戊,e,支出,¥5.00,零钱通,支付成功,4200000000000000000000000025\t,M5\t,/",
+            "2026-09-03 12:05:00,微信红包,己,/,收入,¥6.00,/,已存入零钱,1000000000000000000000000026\t,/,/",
+        ]
+        st = read_statement(self.wechat_file(rows), self.draft("wechat"))
+        self.assertEqual([r.payee for r in st.rows], ["丁", "戊", "己"])
+        self.assertEqual(dict(st.ignored), {"skipped by [[skip]]": 3})
 
     def test_a_direction_it_does_not_know_stops_everything(self):
-        odd = WECHAT_ROWS[0].replace(",支出,", ",待定,")
+        odd = WECHAT_ROWS[2].replace(",支出,", ",待定,")
         with self.assertRaises(LedgerError) as ctx:
             read_statement(self.wechat_file([odd]), self.draft("wechat"))
         self.assertIn("待定", str(ctx.exception))
@@ -197,17 +215,30 @@ class WeChat(DraftCase):
     def test_importing_is_exact_and_repeatable(self):
         mapping = self.draft("wechat")
         first = run_import(self.ledger, self.wechat_file(), mapping, account="微信")
-        self.assertEqual((first["rows_read"], first["pending"]), (4, 4))
+        self.assertEqual((first["rows_read"], first["pending"]), (3, 3))
         again = run_import(self.ledger, self.wechat_file(name="again.csv"), mapping, account="微信")
-        self.assertEqual(again["duplicates_skipped"], 4)
+        self.assertEqual(again["duplicates_skipped"], 3)
 
     def test_a_refund_and_its_order_are_both_kept_so_they_net_to_zero(self):
-        rows = WECHAT_ROWS[:1] + [
+        rows = [
             "2026-09-04 09:00:00,商户消费,电商,手机壳,支出,¥59.00,零钱,已全额退款,4200000000000000000000000010\t,M0010\t,/",
             "2026-09-05 09:00:00,退款,电商,手机壳-退款,收入,¥59.00,零钱,已退款,5000000000000000000000000011\t,M0010\t,/",
         ]
         st = read_statement(self.wechat_file(rows), self.draft("wechat"))
-        self.assertEqual(sum(r.amount for r in st.rows), D("-18.00"))
+        self.assertEqual((len(st.rows), sum(r.amount for r in st.rows)), (2, D("0.00")))
+
+    def test_a_card_refund_is_dropped_together_with_its_card_order(self):
+        rows = [
+            "2026-09-04 09:00:00,商户消费,电商,手机壳,支出,¥59.00,中国银行储蓄卡(3564),已全额退款,4200000000000000000000000012\t,M0012\t,/",
+            "2026-09-05 09:00:00,退款,电商,手机壳-退款,收入,¥59.00,中国银行储蓄卡(3564),已退款,5000000000000000000000000013\t,M0012\t,/",
+        ]
+        st = read_statement(self.wechat_file(rows), self.draft("wechat"))
+        self.assertEqual(st.rows, [])
+
+    def test_the_card_skip_is_one_regex_rule_not_a_list_of_personal_card_numbers(self):
+        mapping = self.draft("wechat")
+        self.assertEqual([(c, v) for c, v, _ in mapping.skip_when], [("支付方式", ())])
+        self.assertIsNotNone(mapping.skip_when[0][2])
 
 
 @full_checkout_only

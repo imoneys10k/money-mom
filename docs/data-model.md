@@ -32,12 +32,13 @@
 |---|---|---|
 | `v` | 是 | schema 版本，整数，当前为 `1` |
 | `id` | 是 | 事件 ID，在账本内唯一；字符限 `[0-9A-Za-z_-]`，长度 1 到 64。程序生成的是 ULID（按时间可排序），手写或导入的不强制 |
-| `kind` | 是 | `open` / `close` / `txn` / `confirm` / `void` / `assert` / `price` |
+| `kind` | 是 | `open` / `close` / `txn` / `confirm` / `void` / `assert` / `price` / `review` |
 | `ts` | 是 | 记录时间，RFC 3339 且带时区偏移 |
 | `actor` | 是 | `{"type": "human" 或 "agent", "name": "..."}`，谁写入的 |
 | `source` | 否 | 来源，见下 |
 | `confidence` | 否 | 0 到 1；人工直接录入时为 `null` |
 | `meta` | 否 | 自由键值，允许未知键 |
+| `chain` | 否 | 哈希链：64 位小写十六进制，由程序写入，见“哈希链” |
 
 `source` 结构：`{"type": "chat" | "file" | "screenshot" | "import" | "manual", "ref": "说明或文件名", "sha256": "文件内容哈希（可选）"}`。`type` 为 `file` / `screenshot` / `import` 时，`ref` 不得是绝对路径（以 `/`、`~`、盘符或 `\\` 开头），避免泄露本机路径；也不得包含凭证。
 
@@ -175,6 +176,28 @@
 
 金额存两列：`amount_text`（精确）和 `amount`（`REAL`，便于 agent 写 `SUM`）。**余额、报表和断言校验一律用 Python `Decimal` 计算，不以 SQL 浮点结果为准**；`query` 命令按币种精度对结果取整后再返回。
 
+## 重复判断 `review`
+
+两笔交易是不是同一笔真实支付，由**人**判断，判断记成一个事件：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `targets` | 是 | 恰好两个不同的交易 ID |
+| `verdict` | 是 | `same`（同一笔）或 `different`（两笔，以后不再问） |
+| `keep` | `same` 时必填 | 保留哪一笔（必须是 `targets` 之一）；`different` 不能带 |
+
+`review` 本身不改变任何余额。`same` 的写入同时带一个对另一笔的 `void`（`reason` 为 `duplicate of <keep>`，`meta.duplicate_of` 为保留那笔的 ID），两者在同一批里全有或全无；`different` 若放行了一笔被挂起的导入行，则同批再带一个 `confirm`（`meta.released_by_review`）。`review` 也可以被 `void`，那样这一对会重新出现在候选里。agent 写入时 `meta.user_said` 记录用户的原话。
+
+**候选**不是事件，是每次从当前状态推导出来的：只比较“一条资产或负债分录”的简单收支（转账与换汇不在其内）；币种、金额（含正负）完全相同；日期相差不超过窗口（默认 2 天）；来源不同——同一份账单文件的行共用一个来源（`source.sha256`），其余每条记录各自是一个来源，而两条手记只在同一天同一账户里才算候选。证据与档位：账单行 `meta.import.via`（支付方式）指向另一条的账户（账户别名里的名字或 4 位数字，或账户名里的非通用词）、对方或说明相同（规范化后相等或互相包含）→ 一天内即为 `likely`；账单行与手记在同一天同一账户 → `likely`；其余 `possible`。已有 `review`（未被作废）的一对不再出现。
+
+导入时，一行若与账本中已有记录构成候选，则写成 `pending` 并带 `meta.held = "duplicate_review"`；`import_hash` 照常写入。被判为 `same` 而作废的导入行，其 `import_hash` 在再次导入时仍然被视为“已导入”，不会回来。
+
+## 哈希链
+
+每个事件的 `chain` = `sha256(上一个 chain + "\n" + 本事件去掉 chain 之后的规范化 JSON)`（键排序、紧凑分隔符、不转义非 ASCII）。第一个 chain 的“上一个”是常量 `money-mom chain v1`。在加入哈希链之前写入的事件没有 `chain`，但仍然参与计算，所以第一个带 `chain` 的事件覆盖了此前的全部历史。
+
+读取时校验：带 `chain` 的事件与计算值不符 → `chain_broken`；链开始之后出现没有 `chain` 的事件 → `chain_missing`。不符之后以事件里存的值继续，所以一处改动只在发生的地方报告一次。校验**不阻止**读取或写入，由 `money-mom verify`、`check`、`doctor` 报告。限制：重算此后所有哈希的改写发现不了，所以 `verify` 打印链头，可以另外保存。
+
 ## 写入流程
 
 1. agent 提交**结构化意图**（如 `spend`），不是账本文本。
@@ -193,6 +216,8 @@
 - `confirm` 与 `void` 的目标存在，且不重复作废。
 - 所有 `assert` 与由事件流算出的余额一致。
 - `import_hash` 在账本内不重复，除非显式标注。
+- `review` 的两个目标都存在；`void` 的目标也可以是 `review`。
+- 哈希链没有被改动（`verify`）。
 
 ## 导出 Beancount（对应关系）
 

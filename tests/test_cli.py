@@ -251,7 +251,7 @@ class Doctor(CliTestCase):
         data = self.js("doctor")["data"]
         self.assertTrue(data["ok"])
         self.assertEqual(
-            {c["name"] for c in data["checks"]}, {"python", "sqlite", "ledger", "assertions", "writable", "cache"}
+            {c["name"] for c in data["checks"]}, {"python", "sqlite", "ledger", "assertions", "chain", "writable", "cache"}
         )
         info = data["ledger"]
         self.assertEqual((info["tone"], info["base_currency"], info["auto_post_confidence"]), ("gentle", "CNY", 0.9))

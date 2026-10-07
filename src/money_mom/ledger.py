@@ -281,6 +281,12 @@ class Ledger:
     def reload(self) -> None:
         self.state = self._replay(self.ledger_dir)
 
+    def verify_chain(self) -> list[Problem]:
+        """Replay from disk and report events whose chain value does not match (edited, removed, reordered or
+        hand-added). It only catches changes made without recomputing every later value."""
+        self.reload()
+        return list(self.state.chain_problems)
+
     def check(self) -> list[Problem]:
         """Replay everything from disk and re-verify live assertions against the final state."""
         self.reload()
@@ -313,6 +319,8 @@ class Ledger:
                 where = f"event #{index + 1} of this write" if len(raws) > 1 else None
                 if clamp_ts and fresh.last_ts is not None:
                     raw = self._clamped(raw, fresh.last_ts)
+                raw = {k: v for k, v in raw.items() if k != "chain"}
+                raw["chain"] = fresh.next_chain(raw)  # ties this event to everything written before it
                 try:
                     ev = parse_event(raw, where)
                     self._check_write_policy(ev)

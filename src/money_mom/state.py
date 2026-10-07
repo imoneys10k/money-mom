@@ -7,12 +7,22 @@ Validation happens before any mutation, so a rejected event leaves the state unt
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .errors import RuleError
-from .events import Assert, Close, Confirm, Event, Open, Posting, Price, Txn, Void
+from .events import Assert, Close, Confirm, Event, Open, Posting, Price, Review, Txn, Void
+
+CHAIN_GENESIS = "money-mom chain v1"
+
+
+def chain_link(previous: str, raw: dict) -> str:
+    """The chain value of an event: a hash of the previous value and of the event itself (without its own `chain`)."""
+    body = json.dumps({k: v for k, v in raw.items() if k != "chain"}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(f"{previous}\n{body}".encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -60,6 +70,16 @@ class PriceRecord:
         return self.void_event_id is not None
 
 
+@dataclass
+class ReviewRecord:
+    event: Review
+    void_event_id: str | None = None
+
+    @property
+    def voided(self) -> bool:
+        return self.void_event_id is not None
+
+
 @dataclass(frozen=True)
 class Problem:
     code: str
@@ -73,10 +93,16 @@ class LedgerState:
     txns: dict[str, TxnRecord] = field(default_factory=dict)
     assertions: dict[str, AssertRecord] = field(default_factory=dict)
     prices: dict[str, PriceRecord] = field(default_factory=dict)
+    reviews: dict[str, ReviewRecord] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     _ids: set[str] = field(default_factory=set)
     _last_ts: _dt.datetime | None = None
     _import_index: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+    chain_head: str = CHAIN_GENESIS
+    chain_problems: list[Problem] = field(default_factory=list)
+    chained_events: int = 0
+    unchained_events: int = 0
+    _chain_started: bool = False
 
     @property
     def last_ts(self) -> _dt.datetime | None:
@@ -92,9 +118,41 @@ class LedgerState:
                 code="ts_regression",
             )
         getattr(self, f"_apply_{ev.kind}")(ev)
+        self._advance_chain(ev)
         self._ids.add(ev.id)
         self._last_ts = ev.ts
         self.events.append(ev)
+
+    def _advance_chain(self, ev: Event) -> None:
+        """Track the hash chain. A mismatch is recorded, never raised: the ledger stays readable and
+        `money-mom verify` / `doctor` report it. The head resyncs to the stored value so that one edited
+        event is reported once, at the place it happened."""
+        expected = chain_link(self.chain_head, ev.raw)
+        stored = ev.raw.get("chain")
+        if stored is None:
+            if self._chain_started:
+                self.chain_problems.append(Problem(
+                    "chain_missing",
+                    f"event {ev.id} has no chain value although earlier events do: it was added by hand",
+                    ev.id,
+                ))
+            self.unchained_events += 1
+            self.chain_head = expected
+            return
+        self._chain_started = True
+        self.chained_events += 1
+        if stored != expected:
+            self.chain_problems.append(Problem(
+                "chain_broken",
+                f"event {ev.id} does not match its chain value: it, or something before it, was changed, "
+                "removed or reordered after it was written",
+                ev.id,
+            ))
+        self.chain_head = stored
+
+    def next_chain(self, raw: dict) -> str:
+        """The chain value a new event must carry, given everything already replayed."""
+        return chain_link(self.chain_head, raw)
 
     def balances(self, as_of: _dt.date | None = None) -> dict[tuple[str, str], Decimal]:
         """Balance per (account, currency) from posted, non-voided transactions."""
@@ -346,11 +404,41 @@ class LedgerState:
                 raise RuleError(f"{ev.target} is already voided", code="already_voided")
             prec.void_event_id = ev.id
             return
+        rrec = self.reviews.get(ev.target)
+        if rrec is not None:
+            if rrec.voided:
+                raise RuleError(f"{ev.target} is already voided", code="already_voided")
+            rrec.void_event_id = ev.id
+            return
         raise RuleError(
-            f"no transaction, assertion or price with id {ev.target!r}",
+            f"no transaction, assertion, price or review with id {ev.target!r}",
             code="unknown_target",
             details={"target": ev.target},
         )
+
+    def _apply_review(self, ev: Review) -> None:
+        for target in ev.targets:
+            self._target_txn(target)
+        self.reviews[ev.id] = ReviewRecord(ev)
+
+    def judged_pairs(self) -> dict[frozenset[str], str]:
+        """Live human judgements: {the two transaction ids: "same" | "different"}. A later one replaces an earlier one."""
+        out: dict[frozenset[str], str] = {}
+        for rec in self.reviews.values():
+            if not rec.voided:
+                out[frozenset(rec.event.targets)] = rec.event.verdict
+        return out
+
+    def duplicate_import_hashes(self) -> set[str]:
+        """import_hash of rows a person said were the same payment as another (voided on purpose): importing the
+        same statement again must not bring them back."""
+        voids = {e.id: e for e in self.events if e.kind == "void"}
+        out: set[str] = set()
+        for rec in self.txns.values():
+            void = voids.get(rec.void_event_id or "")
+            if rec.status == "voided" and rec.event.import_hash and void is not None and isinstance(void.meta.get("duplicate_of"), str):
+                out.add(rec.event.import_hash)
+        return out
 
     def _apply_price(self, ev: Price) -> None:
         self.prices[ev.id] = PriceRecord(ev)

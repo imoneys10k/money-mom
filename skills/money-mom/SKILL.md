@@ -5,7 +5,7 @@ license: MIT
 compatibility: Needs the money-mom command (Python 3.11+, installed with uv). All data stays on the user's computer. Installation steps are in INSTALL.md of https://github.com/imoneys10k/money-mom
 metadata:
   author: imoneys10k
-  version: "0.1.0a4"
+  version: "0.1.0a5"
 ---
 
 # Money Mom
@@ -210,7 +210,7 @@ money-mom reconcile 银行卡 --from-json rows.json --closing-balance 7332.50 --
 
 ## 5. Importing a statement
 
-Statements are CSV files whose layout differs per bank and changes over time, so each layout is described once in a **mapping** and then applied the same way every time. There are no built-in bank presets: write the mapping from the user's real file. For Alipay and WeChat Pay there are **draft** mappings in [references/mappings/alipay.toml](references/mappings/alipay.toml) and [references/mappings/wechat.toml](references/mappings/wechat.toml). They are **not verified against a real export**: they are a starting point to compare with what `import inspect` finds in the user's own file, never something to run blind. If the header differs, fix the mapping; say plainly that it is a draft; and after a dry run, ask the user to check a few rows against their app. Each draft's header lists what it does and does not handle (for example, a row paid by a bank card also appears on that bank's statement: import it from one side only).
+Statements are CSV or `.xlsx` files (an `.xlsx` is read directly: first sheet, dates as `YYYY-MM-DD HH:MM:SS`; no need to convert it) whose layout differs per bank and changes over time, so each layout is described once in a **mapping** and then applied the same way every time. There are no built-in bank presets: write the mapping from the user's real file. For Alipay and WeChat Pay there are mappings in [references/mappings/alipay.toml](references/mappings/alipay.toml) and [references/mappings/wechat.toml](references/mappings/wechat.toml). The Alipay one is a **draft, not verified against a real export**. The WeChat one was checked against **one** real export (header, columns, date format and totals matched), which is still a single sample. Either is a starting point to compare with what `import inspect` finds in the user's own file, never something to run blind. If the header differs, fix the mapping; say plainly which one it is (draft, or checked against one sample); and after a dry run, ask the user to check a few rows against their app. Each file's header lists what it does and does not handle. For example, the WeChat mapping skips rows paid by a bank or credit card (`支付方式` ending in `(1234)`), because those also appear on the card's own statement: import WeChat into the wallet account and import the card statements for the cards.
 
 1. **Look at the file:** `money-mom import inspect FILE --json`. It reports the encoding (GBK is common), the header row, a suggested mapping and `notes` for what it could not decide. **Show the user the notes and ask.** Two are always the user's to answer: for a day/month date such as 03/04/2026, which comes first; and which sign (or which `收/支` value) means money *into* the account, best checked against one transaction they remember.
 2. **Save a mapping:** write TOML and store it with `money-mom import save-map NAME -` (stdin). It is validated before it is stored.
@@ -236,7 +236,7 @@ Statements are CSV files whose layout differs per bank and changes over time, so
 
    [[skip]]
    column = "交易状态"
-   values = ["交易关闭"]
+   values = ["交易关闭"]        # exact cell values; or use regex = '\(\d{4}\)$' to drop rows whose cell contains a match
    ```
 
 3. **Try it first:** `money-mom import run FILE --map NAME --account 支付宝 --dry-run --actor agent:claude-code --confidence 0.9 --json`. Check `rows_read`, `posted`, `pending`, and what was `ignored` (with `ignored_examples`). A row that cannot be read stops everything and is named; nothing is half-imported.
@@ -272,6 +272,31 @@ EOF
 - When a batch is refused the error names the row (`event #N of this write`). Fix it and send the batch again.
 - Tell the user the counts: how many posted, how many pending.
 
+## 5b. The same payment twice
+
+One payment often reaches the books from two places: a WeChat statement and the bank's, or something the user told you in chat and then a statement row. A repeat of the *same file* is already skipped; this is about different sources. The program finds **candidates** and the **user decides**; you never decide for them and you never void one yourself because it "looks the same".
+
+- **A statement row that looks like something already recorded is held.** `import run` writes it as *pending*, so it is in no balance until the user answers. The answer shows `held_for_duplicates` and `possible_duplicates` (each with its evidence and the entry it resembles).
+- **A new `spend`, `income` or `add` that resembles an existing entry** returns `duplicate_candidates` (it is recorded, because the user asked for it; ask whether it repeats the other one).
+- **At any time:** `money-mom dupes` lists every undecided pair. `tier` is `likely` (equal amount and one strong reason: the payment method on the row points at the other account, the payee or description matches, or a hand entry and a statement row fall on the same day in the same account) or `possible` (equal amount, close dates, nothing more).
+
+Ask the user in plain words, one pair at a time, showing both sides: date, amount, account, payee and where each came from (for example "9月3日 瑞幸咖啡 18.00：微信账单里一笔，你上午也告诉过我一笔，是同一笔吗？"). Then write down **their** answer:
+
+```bash
+# the same payment: one is voided (nothing is deleted); keep the one the user names, by default the suggested `suggest_keep`
+money-mom dupes resolve A_ID B_ID --same --keep A_ID --user-said "是同一笔" --actor agent:claude-code
+# two real payments: remembered, never asked again; a held row is released into the books
+money-mom dupes resolve A_ID B_ID --different --user-said "不是，我喝了两杯" --actor agent:claude-code
+```
+
+An agent must pass `--user-said` (what the user answered) or the command is refused (`user_decision_required`). A held row that resembles two entries is released only after both pairs are answered. A voided duplicate stays skipped when the statement is imported again. To change an answer, `void` the review event and ask again.
+
+Not covered: a transfer between the user's own accounts that shows on both statements (see step 7 above), and rows with no amount match at all.
+
+## 5c. Has the ledger been changed behind my back?
+
+Every event carries a hash of everything before it. `money-mom verify` (also part of `check` and `doctor`) reports an event that was edited, removed or added by hand after it was written. Run it when something looks off, or before a reconciliation the user cares about. It **cannot** prove that nobody rewrote the whole file and recomputed every hash; for that, the user can note the `head` it prints somewhere else and compare later. Events written before this feature existed are not protected until the next write chains over them. Nothing leaves the computer.
+
 ## 6. Not covered yet
 
 There are no `refund`, lending or investment (holdings, cost basis, gains) commands yet. For a refund, show the user the reversed postings and, if they agree, record them with `add --posting` (money back into the account, expense reduced). For anything else, say it is not supported yet instead of improvising.
@@ -286,6 +311,8 @@ Exit code 1 means the ledger said no; 2 means the command line was wrong. With `
 | `unbalanced` | Only possible with `add`; recheck the amounts. Prefer the intent commands. |
 | `confidence_required`, `confidence_too_low` | Pass an honest `--confidence`; below the threshold record it as pending. |
 | `duplicate_import` | Already recorded. Tell the user; do not force it. (`import run` skips repeats by itself.) |
+| `user_decision_required` | A judgement about a duplicate is the user's. Ask them, then pass their answer with `--user-said`. |
+| `invalid_review` | `--same` needs `--keep` (one of the two ids); `--different` takes no `--keep`. |
 | `invalid_statement` | The file could not be read; the message names the lines. Check the mapping with `import inspect`, or `--encoding`. |
 | `invalid_mapping`, `unknown_mapping` | The mapping is invalid or not saved. Fix the TOML and `import save-map` it again. |
 | `reconcile_not_clean` | `--assert` only seals a clean reconciliation. Show the user what is left. |

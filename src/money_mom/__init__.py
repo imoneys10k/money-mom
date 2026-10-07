@@ -1,6 +1,6 @@
 """Money Mom: an append-only, double-entry ledger engine for AI agents."""
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 from .errors import LedgerError, RuleError, ValidationError
 from .ledger import Ledger

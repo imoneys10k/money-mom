@@ -119,7 +119,7 @@ class MappingParsing(unittest.TestCase):
         self.assertEqual((m.name, m.ccy, m.sign, m.date_formats), ("alipay-demo", "CNY", "unsigned", ("%Y-%m-%d %H:%M:%S",)))
         self.assertEqual((m.direction_in, m.direction_out, m.direction_ignore), (("收入",), ("支出",), ("不计收支",)))
         self.assertEqual([r.account for r in m.rules], ["咖啡", "应收"])
-        self.assertEqual(m.skip_when, (("交易状态", ("交易关闭",)),))
+        self.assertEqual(m.skip_when, (("交易状态", ("交易关闭",), None),))
 
     def test_full_width_names_are_normalised_like_the_file(self):
         m = parse_mapping('[columns]\ndate = "时间"\namount = "金额（元）"\n[format]\ndate = "%Y-%m-%d"\n')
