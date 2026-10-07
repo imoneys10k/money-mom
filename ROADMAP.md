@@ -8,9 +8,9 @@
 - [x] 命名 Money Mom，确定 slogan
 - [x] 创建公开仓库，MIT 许可证
 - [x] 确定方向：开源、复式记账、兼容多种 AI agent、通用加投资者专攻
-- [ ] **决策：实现语言**（Python 标准库 vs TypeScript/Node，见 docs/design.md“待决策”）
-- [ ] **决策：存储方案**（事件流 JSONL + SQLite 缓存）最终确认
-- [ ] 调研各 agent 的 skill / 指令 / MCP 加载方式（Claude Code、Codex、Cursor、Gemini CLI 等），记录在 docs/agents.md
+- [x] 决策：实现语言为 Python 标准库，npm 仅做轻量启动器
+- [x] 决策：折中路线——自研内核与事件流存储（JSONL + SQLite 缓存），同时导出 Beancount
+- [x] 调研各 agent 的 skill 加载方式，结论见 [docs/agents.md](docs/agents.md)（MCP 配置留到 M6 再查）
 - [ ] 数据模型 v0 规格（docs/data-model.md）
 
 ## M1 · v0.1 内核与“记一笔”
@@ -32,11 +32,16 @@
 
 目标：对 AI 说一句话就能装好，且跨 agent、跨平台。
 
+- [ ] 仓库布局：`skills/money-mom/SKILL.md`，并用 `skills-ref validate` 校验
 - [ ] `INSTALL.md`：写给 agent 读的安装说明，README 里放“一句话安装”提示词
-- [ ] 发布到包管理器（PyPI 或 npm，取决于语言决策；另一边做轻量启动器）
-- [ ] `money-mom init`：一条命令生成账本目录并安装对应 agent 的指令
+- [ ] 实测通用安装器：`npx skills add imoneys10k/money-mom` 在各 agent 上能装好
+- [ ] 发布 PyPI 包 `money-mom`（引擎），skill 锁定版本调用 `uvx money-mom==x.y.z`
+- [ ] 发布 npm 包 `money-mom`（轻量启动器，找到或安装 `uv` 后调用引擎）
+- [ ] `money-mom init`：创建账本目录（仓库之外）
 - [ ] `money-mom doctor`：自检环境、版本、账本目录与权限
-- [ ] 各 agent 适配：Claude Code、Codex、Cursor、Gemini CLI 等
+- [ ] Claude Code 插件市场入口（`.claude-plugin/marketplace.json`）
+- [ ] 逐个 agent 实测：Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot
+- [ ] 为不支持 skill 的 agent 提供 `AGENTS.md` 兜底说明
 - [ ] GitHub Actions：测试、打包、发布
 - [ ] Release 流程：语义化版本、CHANGELOG、Release notes
 - [ ] 项目主页（GitHub Pages）

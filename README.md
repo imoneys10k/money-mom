@@ -43,6 +43,8 @@ AI 只负责理解你的话，**账由程序记**：
 
 `INSTALL.md` 和各平台安装包还在计划中（见 ROADMAP 的“安装与分发”）。
 
+计划的做法：Money Mom 以通用的 [Agent Skills](https://agentskills.io) 标准（`SKILL.md`）发布，一份 skill 即可用于 Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot 等；记账引擎是发布在 PyPI 的 Python 包，由 skill 通过 `uvx` 调用，另提供 `npx` 启动器。各 agent 的加载方式见 [docs/agents.md](docs/agents.md)。
+
 ## 定位
 
 - **通用**：普通人的日常记账，说话就能记。

@@ -19,22 +19,14 @@ Money Mom 是**账本的 agent 接口层**，不是又一个记账 App。价值�
 11. **数据与代码分离。** 仓库只含合成的 demo 数据，用户真实账本放在仓库之外。
 12. **人格只是语气。** “妈妈”影响说话方式，不影响数字，也不替用户做资金决定。
 13. **不做资金操作。** 不转账、不下单、不存银行凭证，银行与券商数据只读导入。
+14. **实现语言：Python 标准库。** 金额与持仓批次计算最怕出错，`decimal` 与 `fractions` 是标准库现成的。通过 `uvx` 分发，`uv` 会自带合适的 Python，不依赖用户系统 Python 版本。
+15. **npm 只做轻量启动器。** `npx money-mom` 负责找到或安装 `uv`，再调用 Python 引擎；内核不用 JS 重写。
+16. **skill 采用 Agent Skills 开放标准（`SKILL.md`）。** 一份 skill 覆盖 Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot 等；`SKILL.md` 只用规范里的通用字段。详见 [agents.md](agents.md)。
+17. **引擎与 skill 分离，并锁定引擎版本。** skill 只是使用说明，通过 `uvx money-mom==x.y.z` 调用 PyPI 上的引擎。
+18. **`AGENTS.md` 作为不支持 skill 的 agent 的兜底。**
 
 ## 待决策
 
-### 实现语言
-
-| | Python（标准库） | TypeScript / Node |
-|---|---|---|
-| 金额精度 | `decimal` 现成，持仓批次的分数更好处理 | 无内置高精度，需用整数最小单位或自写 |
-| SQLite | `sqlite3` 稳定 | `node:sqlite` 较新 |
-| 分发 | `uvx` / `pipx` | `npx`，agent 用户通常已装 Node |
-| 老环境 | macOS 自带 Python 版本偏旧 | 需要较新的 Node |
-| 对拍 Beancount | 同语言，方便 | 只在开发期调用 |
-
-判断标准：谁更能做到“对 AI 说一句话就装好”，以及金额与持仓计算是否好写对。可以用另一种语言做一个轻量启动器（例如 npm 包去调用 Python 实现）。
-
-### 其他
-
-- 事件流文件的具体格式与字段（见 M0 的 data-model 规格）。
-- 各 agent 的安装方式差异（见 M0 的 docs/agents.md 调研）。
+- 事件流文件的具体格式与字段（M0 的 `docs/data-model.md`）。
+- Python 最低版本（倾向 3.11，由 `uvx` 提供）。
+- 引擎是随 skill 打包在 `scripts/` 里，还是只走 PyPI（目前倾向只走 PyPI，需要离线使用时再补）。
