@@ -9,7 +9,8 @@ from unittest import mock
 from money_mom import Ledger, LedgerError, RuleError, ValidationError
 from money_mom.events import parse_event
 from money_mom.rates import (
-    Fetched, RateUnsupported, convert, convert_balances, fetch_frankfurter, find_rate, round_money, update_rates,
+    FRANKFURTER_REF, OPEN_ER_REF, Fetched, RateUnsupported, convert, convert_balances, fetch_frankfurter, fetch_open_er,
+    find_rate, round_money, update_rates,
 )
 from money_mom.cache import open_cache, run_query
 from money_mom.templates import apply_template
@@ -226,6 +227,29 @@ class Fetching(unittest.TestCase):
         self.assertEqual(seen, [])
 
 
+class FallbackFetching(unittest.TestCase):
+    OK = {"result": "success", "base_code": "TWD", "time_last_update_utc": "Wed, 07 Oct 2026 00:02:32 +0000",
+          "rates": {"CNY": 0.2192, "USD": 0.0314}}
+
+    def test_a_good_answer_is_dated_by_the_source_and_names_it(self):
+        seen = []
+        got = fetch_open_er("TWD", "CNY", None, opener=opener_for(self.OK, seen=seen))
+        self.assertEqual((got.base, got.quote, got.date, got.rate), ("TWD", "CNY", dt.date(2026, 10, 7), "0.2192"))
+        self.assertIn("open.er-api.com", got.source)
+        self.assertEqual(seen[0][0], "https://open.er-api.com/v6/latest/TWD")  # only a currency code goes out
+
+    def test_it_has_no_history_so_an_earlier_day_is_unsupported_not_answered_with_today(self):
+        self.assertRaises(RateUnsupported, fetch_open_er, "TWD", "CNY", dt.date(2026, 1, 1), opener=opener_for(self.OK))
+
+    def test_unknown_pairs_and_bad_answers(self):
+        self.assertRaises(RateUnsupported, fetch_open_er, "TWD", "XXX", None, opener=opener_for(self.OK))
+        self.assertRaises(RateUnsupported, fetch_open_er, "TWD", "CNY", None, opener=opener_for({**self.OK, "result": "error"}))
+        for payload in ({**self.OK, "rates": {"CNY": 0}}, {**self.OK, "time_last_update_utc": "yesterday-ish"}, b"not json"):
+            self.assertEqual(err(fetch_open_er, "TWD", "CNY", None, opener=opener_for(payload)).code, "rates_unavailable")
+        self.assertEqual(err(fetch_open_er, "TWD", "CNY", None, opener=opener_for(status=500)).code, "rates_unavailable")
+        self.assertEqual(err(fetch_open_er, "TWD", "CNY", None, opener=opener_for(exc=urllib.error.URLError("offline"))).code, "rates_unavailable")
+
+
 class Updating(RateCase):
     def setUp(self) -> None:
         super().setUp()
@@ -254,6 +278,25 @@ class Updating(RateCase):
         ev = [e for e in self.ledger.state.events if e.kind == "price"][0]
         self.assertEqual((ev.source["type"], ev.source["ref"]), ("import", "api.frankfurter.dev (ECB reference rate)"))
         self.assertEqual((ev.quote, ev.date), ("CNY", dt.date(2026, 10, 6)))
+
+    def test_the_second_source_is_asked_only_for_what_the_first_does_not_publish(self):
+        asked = []
+
+        def second(base, quote, on):
+            asked.append(base)
+            return Fetched(base, quote, dt.date(2026, 10, 7), "0.2192", OPEN_ER_REF)
+
+        result = self.update(fallback=second)
+        self.assertEqual(asked, ["TWD"])
+        self.assertEqual(result["unsupported"], [])
+        self.assertEqual(sorted(result["sources"]), sorted([FRANKFURTER_REF, OPEN_ER_REF]))
+        twd = [e for e in self.ledger.state.events if e.kind == "price" and e.base == "TWD"][0]
+        self.assertEqual(twd.source["ref"], OPEN_ER_REF)
+
+    def test_a_second_source_that_does_not_know_it_either_leaves_it_unsupported(self):
+        def second(base, quote, on):
+            raise RateUnsupported(base)
+        self.assertEqual(self.update(fallback=second)["unsupported"], ["TWD"])
 
     def test_only_foreign_currencies_are_fetched(self):
         self.update()
@@ -349,7 +392,7 @@ class Cli(CliTestCase):
             again, _ = self.run_cli("--ledger", str(self.root), "rates", "update")
         self.assertEqual([r["base"] for r in data["recorded"]], ["USD"])
         self.assertIn("Would record 1 rate(s)", preview)
-        self.assertIn("1 USD = 6.7046 CNY  (2026-10-06)", preview)
+        self.assertIn("1 USD = 6.7046 CNY  (2026-10-06, api.frankfurter.dev (ECB reference rate))", preview)
         self.assertIn("not live market quotes", preview)
         self.assertIn("1 already up to date", again)
         self.js("rates", "set", "EUR", "CNY", "7.8", "--source", "bank app", "--date", "2026-10-06")
@@ -358,6 +401,28 @@ class Cli(CliTestCase):
         self.assertEqual(listed[("EUR", "CNY")]["source"], "bank app")
         self.assertEqual(len(self.js("rates", "list", "--base", "EUR")["data"]), 1)
         self.run_cli("--ledger", str(self.root), "rates", "list")
+
+    def test_the_second_source_covers_twd_and_can_be_switched_off(self):
+        self.js("open", "Assets:台币户", "--date", "2026-01-01", "--currency", "TWD")
+        self.js("transfer", "1000", "--ccy", "TWD", "--from", "期初", "--to", "台币户", "--date", "2026-01-02")
+        asked = []
+
+        def second(base, quote, on=None, **kw):
+            asked.append(base)
+            return Fetched(base, quote, dt.date(2026, 10, 7), "0.2192", OPEN_ER_REF)
+
+        def unsupported(base, quote, on=None, **kw):
+            if base == "TWD":
+                raise RateUnsupported(base)
+            return self.fake_fetch(base, quote, on)
+
+        with mock.patch("money_mom.cli.fetch_frankfurter", unsupported), mock.patch("money_mom.cli.fetch_open_er", second):
+            off = self.js("rates", "update", "--no-fallback", "--dry-run")["data"]
+            self.assertEqual((asked, off["unsupported"]), ([], ["TWD"]))
+            text, _ = self.run_cli("--ledger", str(self.root), "rates", "update")
+        self.assertEqual(asked, ["TWD"])
+        self.assertIn("exchangerate-api.com", text)
+        self.assertIn("1 TWD = 0.2192 CNY", text)
 
     def test_set_needs_a_source_and_a_sane_rate(self):
         self.run_cli("--ledger", str(self.root), "rates", "set", "USD", "CNY", "7", expect=2)

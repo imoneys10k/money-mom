@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -26,11 +27,13 @@ from .dupes import DEFAULT_WINDOW_DAYS, candidates_involving, find_candidates, r
 from .errors import LedgerError
 from .events import ROOTS
 from .intents import SPECS, postings_with_slots, record_exchange, record_intent, resolve_account
+from .trades import import_trades, read_rows, read_tradegit
+from .invest import holdings as holdings_view, parse_marks, realized, record_buy, record_dividend, record_sell, setup_investing
 from .importing import (
     _money, add_rule, inspect_statement, list_mappings, load_mapping, read_statement, recheck, run_import, save_mapping,
 )
 from .ledger import TONES, Ledger
-from .rates import convert_balances, fetch_frankfurter, update_rates
+from .rates import convert_balances, fetch_frankfurter, fetch_open_er, update_rates
 from .reconcile import reconcile, rows_from_json, seal
 from .charts import FORMATS, KINDS, LANGS, chart_data, render
 from .alerts import find_alerts
@@ -114,7 +117,11 @@ def _txn_summary(ledger: Ledger, event_id: str) -> dict[str, Any]:
 
 
 def _postings_json(postings) -> list[dict[str, Any]]:
-    return [{"account": p.account, "amount": _fmt(p.amount), "ccy": p.ccy} for p in postings]
+    return [
+        {"account": p.account, "amount": _fmt(p.amount), "ccy": p.ccy,
+         **({"cost": {"per_unit": _fmt(p.cost.per_unit), "ccy": p.cost.ccy, "date": p.cost.date.isoformat() if p.cost.date else None}} if p.cost else {})}
+        for p in postings
+    ]
 
 
 def _width(text: str) -> int:
@@ -652,12 +659,55 @@ def cmd_balance(args: argparse.Namespace) -> tuple[Any, str]:
     return {"as_of": args.as_of, "balances": rows}, text
 
 
+def _networth_by_account(ledger: Ledger, target: str, on: dt.date, as_of: dt.date | None) -> tuple[Any, str]:
+    """Every asset and liability account on its own, converted into one currency. Shares and fund units are valued
+    at a stored price; an account with something unpriced is marked partial and that holding is left out of its
+    total, never counted as zero."""
+    per_account: dict[str, dict[tuple[str, str], Decimal]] = {}
+    for (account, ccy), amount in ledger.state.balances(as_of).items():
+        if account.split(":", 1)[0] in ("Assets", "Liabilities") and amount != 0:
+            per_account.setdefault(account, {})[(account, ccy)] = amount
+    rows, missing = [], set()
+    totals = {"Assets": Decimal(0), "Liabilities": Decimal(0)}
+    for account in sorted(per_account):
+        conv = convert_balances(ledger.state, per_account[account], target, on, pivot=ledger.base_currency)
+        root = account.split(":", 1)[0]
+        totals[root] += Decimal(conv["total"])
+        missing |= set(conv["missing"])
+        rows.append({
+            "account": account, "group": root, "total": conv["total"], "partial": conv["partial"], "missing": conv["missing"],
+            "holdings": [{"ccy": b["ccy"], "amount": b["amount"], "converted": b["converted"]} for b in conv["balances"]],
+        })
+    for row in rows:
+        row["share_of_assets"] = (
+            format((Decimal(row["total"]) / totals["Assets"] * 100).quantize(Decimal("0.1")), "f")
+            if row["group"] == "Assets" and totals["Assets"] else None
+        )
+    rows.sort(key=lambda r: (r["group"] != "Assets", -Decimal(r["total"]) if r["group"] == "Assets" else Decimal(r["total"])))
+    net = totals["Assets"] + totals["Liabilities"]
+    data = {
+        "in": target, "as_of": on.isoformat(), "accounts": rows, "assets": format(totals["Assets"], "f"),
+        "liabilities": format(totals["Liabilities"], "f"), "net_worth": format(net, "f"),
+        "partial": bool(missing), "missing": sorted(missing),
+    }
+    table = _table(["account", f"in {target}", "share", "holds"], [
+        [r["account"], r["total"] + (" (partial)" if r["partial"] else ""), (r["share_of_assets"] + "%") if r["share_of_assets"] else "",
+         ", ".join(f"{h['amount']} {h['ccy']}" for h in r["holdings"])] for r in rows
+    ]) if rows else "No balances."
+    text = f"Net worth by account, in {target}\n{table}\nAssets {data['assets']}, liabilities {data['liabilities']}, net worth {data['net_worth']} {target}"
+    if missing:
+        text += f"  (PARTIAL)\n  No price or rate for {', '.join(sorted(missing))}: left out of the totals above. Record one with `money-mom rates set`."
+    return data, text
+
+
 def cmd_networth(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     as_of = dt.date.fromisoformat(args.as_of) if args.as_of else None
     target = parse_currency(args.target_ccy) if args.target_ccy else (ledger.base_currency,)
     if len(target) != 1:
         raise UsageError(f"--in needs one currency, such as CNY or 人民币; got {args.target_ccy!r}")
+    if args.by_account:
+        return _networth_by_account(ledger, target[0], as_of or dt.date.today(), as_of)
     totals: dict[str, Decimal] = {}
     for (account, ccy), amount in ledger.state.balances(as_of).items():
         if account.split(":", 1)[0] in ("Assets", "Liabilities"):
@@ -816,18 +866,24 @@ def cmd_chart(args: argparse.Namespace) -> tuple[Any, str]:
     return data, text
 
 
+def _asset_or_currency(ledger: Ledger, text: str) -> tuple[str, ...]:
+    """A held symbol such as AAPL (a price is recorded against it), or else a currency."""
+    symbol = text.strip().upper()
+    return (symbol,) if symbol in ledger.state.commodities else parse_currency(text)
+
+
 def cmd_rates(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     if args.rates_command == "update":
         on = dt.date.fromisoformat(args.date) if args.date else None
         data = update_rates(
             ledger, on=on, currencies=args.currency, fetch=fetch_frankfurter,
-            actor=_actor(args), dry_run=args.dry_run,
+            fallback=None if args.no_fallback else fetch_open_er, actor=_actor(args), dry_run=args.dry_run,
         )
         if not data["checked"]:
             return data, f"No currency other than {data['base_currency']} in your ledger yet, so there is nothing to fetch."
         lines = [("Would record" if args.dry_run else "Recorded") + f" {len(data['recorded'])} rate(s) from {data['source']}:"]
-        lines += [f"  1 {r['base']} = {r['rate']} {r['quote']}  ({r['date']})" for r in data["recorded"]]
+        lines += [f"  1 {r['base']} = {r['rate']} {r['quote']}  ({r['date']}, {r['source']})" for r in data["recorded"]]
         if data["unchanged"]:
             lines.append(f"{len(data['unchanged'])} already up to date.")
         if data["unsupported"]:
@@ -835,10 +891,12 @@ def cmd_rates(args: argparse.Namespace) -> tuple[Any, str]:
                 f"Not covered by the source: {', '.join(data['unsupported'])}. Record one yourself: "
                 f"`money-mom rates set {data['unsupported'][0]} {data['base_currency']} RATE --source \"where it came from\"`."
             )
+        if len(data["sources"]) > 1:
+            lines.append("A second source was asked only for currencies the first one does not publish (it is told only the currency code). Rates By Exchange Rate API: https://www.exchangerate-api.com")
         lines.append("Rates are daily reference prices, not live market quotes.")
         return data, "\n".join(lines)
     if args.rates_command == "set":
-        base, quote = parse_currency(args.base), parse_currency(args.quote)
+        base, quote = _asset_or_currency(ledger, args.base), parse_currency(args.quote)
         if len(base) != 1 or len(quote) != 1:
             raise UsageError("give each currency as one code or word, such as USD or 美元")
         actor = _actor(args)
@@ -855,7 +913,7 @@ def cmd_rates(args: argparse.Namespace) -> tuple[Any, str]:
         )
     rows = []
     for (base, quote), by_date in sorted(ledger.state.effective_prices().items()):
-        if args.base and parse_currency(args.base) != (base,) or args.quote and parse_currency(args.quote) != (quote,):
+        if args.base and _asset_or_currency(ledger, args.base) != (base,) or args.quote and parse_currency(args.quote) != (quote,):
             continue
         day = max(by_date)
         rec = by_date[day]
@@ -972,6 +1030,151 @@ def cmd_verify(args: argparse.Namespace) -> tuple[Any, str]:
         "  (write the head down somewhere else if you want to be able to prove later that nothing at the end was cut off)",
     ]
     lines += [f"  [{p['code']}] {p['message']}" for p in data["problems"]]
+    return data, "\n".join(lines)
+
+
+def _need_ccy(args: argparse.Namespace) -> str:
+    if not getattr(args, "ccy", None):
+        raise UsageError("say which currency the price is in with --ccy (for example --ccy USD); it is never guessed")
+    return args.ccy.upper()
+
+
+def cmd_invest(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    data = setup_investing(ledger, dt.date.fromisoformat(args.date) if args.date else dt.date.today(), _actor(args))
+    text = (f"Opened {len(data['opened'])} investing account(s): " + ", ".join(data["opened"])) if data["opened"] else "The investing accounts are already open."
+    return data, text
+
+
+def _trade_text(d: dict[str, Any]) -> str:
+    if d["kind"] == "sell":
+        lots = ", ".join(f"{l['units']} bought {l['bought']} at {l['per_unit']}" for l in d["lots"])
+        return (f"Sold {d['units']} {d['symbol']} at {d['price']} {d['ccy']} on {d['date']} ({d['id']}): proceeds {d['proceeds']}, "
+                f"cost basis {d['cost_basis']}, realised gain {d['realized_gain']} {d['ccy']}"
+                + (f", fee {d['fee']}" if Decimal(d["fee"]) else "") + f"\n  lots ({d['method']}): {lots}")
+    what = "Recorded an opening position of" if d["kind"] == "opening" else "Bought"
+    return (f"{what} {d['units']} {d['symbol']} at {d['price']} {d['ccy']} on {d['date']} ({d['id']}): cost {d['cost']} {d['ccy']}"
+            + (f", fee {d['fee']}" if Decimal(d["fee"]) else "") + f", into {d['account']}")
+
+
+def _trade_handler(kind: str) -> Callable[[argparse.Namespace], tuple[Any, str]]:
+    def handler(args: argparse.Namespace) -> tuple[Any, str]:
+        ledger = Ledger.open(_ledger_path(args))
+        common = dict(
+            units=args.units, symbol=args.symbol, price=args.price, ccy=_need_ccy(args), account=args.account, cash=args.cash,
+            date=dt.date.fromisoformat(args.date) if args.date else dt.date.today(), fee=args.fee or 0,
+            actor=_actor(args), confidence=args.confidence, source=_source(args), meta=_override_meta(args),
+            import_hash=args.import_hash, narration=args.narration,
+        )
+        if kind == "buy":
+            data = record_buy(ledger, opening=args.opening, **common)
+        else:
+            data = record_sell(ledger, method=args.lots, **common)
+        data.pop("postings", None)
+        return data, _trade_text(data)
+    return handler
+
+
+def cmd_dividend(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    data = record_dividend(
+        ledger, amount=args.amount, symbol=args.symbol, ccy=_need_ccy(args), to=args.to,
+        date=dt.date.fromisoformat(args.date) if args.date else dt.date.today(), tax=args.tax or 0,
+        actor=_actor(args), confidence=args.confidence, source=_source(args), meta=_override_meta(args),
+        import_hash=args.import_hash, narration=args.narration,
+    )
+    return data, (f"Recorded a {data['symbol']} dividend of {data['gross']} {data['ccy']} on {data['date']} ({data['id']})"
+                  + (f", {data['tax']} withheld, {data['net']} received" if Decimal(data["tax"]) else "") + f" into {data['account']}")
+
+
+def cmd_trades(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    mapping: dict[str, str] = {}
+    for item in args.account_map or []:
+        name, sep, target = item.partition("=")
+        if not sep or not name or not target:
+            raise UsageError(f"--account-map must look like SOURCE=ACCOUNT, got {item!r}")
+        mapping[name] = target
+    if args.format == "json":
+        text = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+        try:
+            items = json.loads(text)
+        except json.JSONDecodeError as err:
+            raise UsageError(f"{args.file} is not valid JSON: {err}") from None
+        rows, unsupported, seen = read_rows(items)
+        label, digest = ("stdin" if args.file == "-" else Path(args.file).name), hashlib.sha256(text.encode("utf-8")).hexdigest()
+    else:
+        path = Path(args.file).expanduser()
+        rows, unsupported, seen = read_tradegit(path)
+        label = path.name
+        digest = None if path.is_dir() else hashlib.sha256(path.read_bytes()).hexdigest()
+    data = import_trades(
+        ledger, rows, unsupported, seen, label=label, sha256=digest, account=args.account, account_map=mapping,
+        cash=args.cash, since=dt.date.fromisoformat(args.since) if args.since else None,
+        until=dt.date.fromisoformat(args.until) if args.until else None, actor=_actor(args),
+        confidence=args.confidence, dry_run=args.dry_run, lot_method=args.lots,
+    )
+    verb = "Would import" if data["dry_run"] else "Imported"
+    lines = [f"{verb} {data['imported']} of {data['rows']} usable rows from {data['source']} ({data['records_read']} records): "
+             f"{data['buys']} buys, {data['sells']} sells, {data['dividends']} dividends, {data['other_cash']} other cash events."]
+    if data["duplicates_skipped"]:
+        lines.append(f"  {data['duplicates_skipped']} already imported")
+    if data["unsupported_count"]:
+        lines.append(f"  {data['unsupported_count']} not recorded (never guessed):")
+        lines += [f"    {u['where']}: {u['what']}: {u['reason']}" for u in data["unsupported"][:10]]
+    if data["problems"]:
+        lines.append(f"  {len(data['problems'])} row(s) cannot be recorded; nothing is written until they are fixed:")
+        lines += [f"    {p['where']} ({p['date']}): {p['message']}" for p in data["problems"][:10]]
+        lines.append("  A sale of shares the ledger does not hold usually means an opening position is missing: `money-mom buy ... --opening`.")
+    return data, "\n".join(lines)
+
+
+def cmd_holdings(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    data = holdings_view(
+        ledger, as_of=dt.date.fromisoformat(args.as_of) if args.as_of else None, target=args.target, account=args.account,
+        show_lots=args.lots, marks=parse_marks(args.mark),
+    )
+    if not data["positions"]:
+        return data, f"Nothing is held on {data['as_of']}."
+    rows = []
+    for p in data["positions"]:
+        ccy = next(iter(p["cost"]))
+        rows.append([
+            p["account"].split(":", 1)[-1], p["symbol"], p["units"], f"{p['average_cost'][ccy]} {ccy}",
+            f"{p['price']} {p['price_ccy']}" if p["price"] else "-", p["price_source"] or "-",
+            f"{p['market_value']} {p['price_ccy']}" if p["market_value"] else "-",
+            (f"{next(iter(p['unrealized_gain'].values()))} {ccy} ({p['unrealized_pct']}%)" if p["unrealized_gain"] else "-"),
+        ])
+    lines = [f"Holdings on {data['as_of']}", _table(["account", "symbol", "units", "avg cost", "price", "source", "value", "unrealised"], rows)]
+    if args.lots:
+        for p in data["positions"]:
+            lines.append(f"  {p['symbol']} lots: " + "; ".join(f"{l['units']} @ {l['per_unit']} {l['ccy']} on {l['bought']} ({l['days_held']}d)" for l in p["lots"]))
+    c = data["converted"]
+    lines.append(f"In {data['in']}: cost {c['cost']}, market value {c['market_value']}, unrealised {c['unrealized_gain']}" + ("  (PARTIAL: " + ", ".join(c["missing"]) + " not priced)" if c["partial"] else ""))
+    lines += [f"  note: {n}" for n in data["notes"]]
+    return data, "\n".join(lines)
+
+
+def cmd_pnl(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    since = dt.date.fromisoformat(args.since) if args.since else None
+    until = dt.date.fromisoformat(args.until) if args.until else None
+    if args.year:
+        since, until = dt.date(args.year, 1, 1), dt.date(args.year, 12, 31)
+    data = realized(ledger, since=since, until=until, symbol=args.symbol, target=args.target)
+    if not data["sales"] and not data["dividends"]:
+        return data, "No sales or dividends in that period."
+    rows = [[s["date"], s["symbol"], s["units"], s["price"], s["cost_basis"], s["realized_gain"], s["fee"], s["ccy"]] for s in data["sales"]]
+    lines = []
+    if rows:
+        lines += ["Sales", _table(["date", "symbol", "units", "price", "cost basis", "gain", "fee", "ccy"], rows)]
+    if data["dividends"]:
+        lines += ["Dividends", _table(["date", "symbol", "gross", "tax", "net", "ccy"], [[d["date"], d["symbol"], d["gross"], d["tax"], d["net"], d["ccy"]] for d in data["dividends"]])]
+    for ccy, b in data["by_currency"].items():
+        lines.append(f"{ccy}: realised gain {b['realized_gain']}, fees {b['fees']}, dividends {b['dividends']} (tax {b['dividend_tax']})")
+    lines.append(f"In {data['in']}: realised gain {data['realized_gain_converted']}" + ("  (PARTIAL: no rate for " + ", ".join(data["missing"]) + ")" if data["partial"] else ""))
+    lines += [f"  note: {n}" for n in data["notes"]]
     return data, "\n".join(lines)
 
 
@@ -1201,6 +1404,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = command("networth", cmd_networth, "assets minus liabilities, per currency and as one total in --in (default: the base currency)")
     p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the total (default: the ledger's base currency)")
     p.add_argument("--as-of", metavar="DATE")
+    p.add_argument("--by-account", action="store_true", help="net worth account by account (cash, banks, brokers, debts), each converted, with its share of the assets")
 
     p = command("report", cmd_report, "monthly report: income, spending by category, comparison with last month, net worth change")
     p.add_argument("--month", metavar="YYYY-MM", help="default: the current month (month to date)")
@@ -1228,6 +1432,7 @@ def _build_parser() -> argparse.ArgumentParser:
     q.add_argument("--currency", action="append", help="only this currency (repeatable); default: every foreign currency in the ledger")
     q.add_argument("--date", help="YYYY-MM-DD: the rate for that day (default: the latest)")
     q.add_argument("--dry-run", action="store_true", help="fetch and show, write nothing")
+    q.add_argument("--no-fallback", action="store_true", help="do not ask a second source (open.er-api.com) for currencies the ECB does not publish, such as TWD")
     q = rates_sub.add_parser("set", parents=[common], help="record a rate yourself: 1 BASE = RATE QUOTE")
     q.add_argument("base")
     q.add_argument("quote")
@@ -1240,6 +1445,66 @@ def _build_parser() -> argparse.ArgumentParser:
 
     command("pending", cmd_pending, "list transactions waiting for confirmation")
     command("accounts", cmd_accounts, "list accounts")
+
+    p = command("invest", cmd_invest, "create the investing accounts (gains, dividends, fees, tax) in this ledger")
+    p.add_argument("--date", help="YYYY-MM-DD the accounts open (default: today)")
+    p.set_defaults(invest_command="init")
+
+    def trade_flags(p: argparse.ArgumentParser, *, buying: bool) -> None:
+        p.add_argument("units", help="how many shares or fund units; fractions are fine")
+        p.add_argument("symbol", help="the ticker, for example AAPL or 0700.HK")
+        p.add_argument("--price", required=True, help="price per unit")
+        p.add_argument("--ccy", help="the currency of the price and the cash (always say it; it is never guessed)")
+        p.add_argument("--account", required=True, help="the account that holds the shares, e.g. IBKR or Assets:IBKR")
+        p.add_argument("--cash", help="the account the cash moves in (default: the same account)")
+        p.add_argument("--fee", help="commission and fees, in the same currency; recorded as an expense")
+        txn_flags(p)
+        lock_flag(p)
+
+    p = command("buy", _trade_handler("buy"), "record buying shares: creates a lot with its cost")
+    trade_flags(p, buying=True)
+    p.add_argument("--opening", action="store_true", help="an opening position you already held: the cost comes from the opening-balances account, no cash moves")
+
+    p = command("sell", _trade_handler("sell"), "record selling shares: takes the lots (first in first out), records the realised gain")
+    trade_flags(p, buying=False)
+    p.add_argument("--lots", default="fifo", choices=("fifo", "lifo", "hifo"), help="which lots to sell first (default fifo)")
+
+    p = command("dividend", cmd_dividend, "record a dividend received (and any tax withheld)")
+    p.add_argument("amount", help="the gross dividend")
+    p.add_argument("symbol")
+    p.add_argument("--to", required=True, help="the account it was paid into")
+    p.add_argument("--ccy")
+    p.add_argument("--tax", help="tax withheld, in the same currency")
+    txn_flags(p)
+    lock_flag(p)
+
+    p = command("trades", cmd_trades, "import trades and cash events from a TradeGit journal or from rows an agent read off a statement")
+    tsub = p.add_subparsers(dest="trades_command", required=True, metavar="ACTION")
+    q = tsub.add_parser("import", parents=[common], help="record buys, sells, dividends and cash events (read-only on the source)")
+    q.add_argument("file", help="a TradeGit journal (.jsonl file or its journal folder), or a JSON list of rows (- for stdin)")
+    q.add_argument("--format", choices=("tradegit", "json"), default="tradegit")
+    q.add_argument("--account", help="the ledger account that holds the shares and cash, e.g. Assets:IBKR")
+    q.add_argument("--account-map", action="append", metavar="SOURCE=ACCOUNT", help="map a source account name to a ledger account (repeatable)")
+    q.add_argument("--cash", help="a separate account for the cash side")
+    q.add_argument("--since")
+    q.add_argument("--until")
+    q.add_argument("--lots", choices=("fifo", "lifo", "hifo"), default="fifo")
+    q.add_argument("--confidence", type=float)
+    q.add_argument("--dry-run", action="store_true", help="show what would happen and what cannot be recorded, write nothing")
+
+    p = command("holdings", cmd_holdings, "what is held: units, cost, price and its source, value, unrealised gain")
+    p.add_argument("--as-of", help="YYYY-MM-DD (default: today)")
+    p.add_argument("--in", dest="target", metavar="CCY", help="express the totals in this currency (default: the base currency)")
+    p.add_argument("--account", help="only this account")
+    p.add_argument("--lots", action="store_true", help="list every lot")
+    p.add_argument("--mark", action="append", metavar="SYMBOL=PRICE[:CCY]", help="a price to use for today, without recording it (repeatable)")
+
+    p = command("pnl", cmd_pnl, "realised gains of every sale with the lots it took from, plus dividends and fees")
+    p.add_argument("--since")
+    p.add_argument("--until")
+    p.add_argument("--year", type=int)
+    p.add_argument("--symbol")
+    p.add_argument("--in", dest="target", metavar="CCY")
 
     p = command("dupes", cmd_dupes, "possible duplicate payments across sources (list), and record the user's answer (resolve)")
     p.add_argument("--window", type=int, help=f"days apart that still count as the same time (default {DEFAULT_WINDOW_DAYS})")
@@ -1288,7 +1553,7 @@ def main(argv: list[str] | None = None) -> int:
         if not hasattr(args, name):
             setattr(args, name, False if name == "json" else None)
     for name in ("date", "status", "narration", "payee", "import_hash", "confidence", "source_type",
-                 "source_ref", "source_sha256", "from_json", "override_lock", "currency", "posting", "window", "user_said", "keep"):
+                 "source_ref", "source_sha256", "from_json", "override_lock", "currency", "posting", "window", "user_said", "keep", "no_fallback"):
         if not hasattr(args, name):
             setattr(args, name, None)
     try:

@@ -59,10 +59,28 @@ def _bad(message: str, code: str = "invalid_event", **details: Any) -> Validatio
 
 
 @dataclass(frozen=True)
+class Cost:
+    """What one unit of a held commodity (a share, a fund unit) cost, in a currency, and the day the lot was
+    acquired. A posting with a cost is a *lot*: buying creates one, selling names the lot it takes from."""
+
+    per_unit: Decimal
+    ccy: str
+    date: _dt.date | None = None  # None means: the date of the transaction
+
+
+@dataclass(frozen=True)
 class Posting:
     account: str | None
     amount: Decimal
     ccy: str
+    cost: Cost | None = None
+
+    def weight(self) -> tuple[str, Decimal]:
+        """The (currency, amount) this posting counts for when a transaction is checked for balance: a lot counts
+        for its cost, everything else for itself."""
+        if self.cost is not None:
+            return self.cost.ccy, self.amount * self.cost.per_unit
+        return self.ccy, self.amount
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -219,6 +237,28 @@ def _opt_str(obj: dict, key: str) -> str | None:
     return value
 
 
+def _parse_cost(value: Any, label: str, ccy: str, amount: Decimal) -> Cost | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise _bad(f"{label}.cost must be an object", "invalid_cost")
+    extra = set(value) - {"per_unit", "ccy", "date"}
+    if extra:
+        raise _bad(f"{label}.cost: unknown field(s) {sorted(extra)}", "unknown_field")
+    if "per_unit" not in value or "ccy" not in value:
+        raise _bad(f"{label}.cost needs `per_unit` and `ccy`", "invalid_cost")
+    per_unit = parse_amount(value["per_unit"], f"{label}.cost.per_unit")
+    if per_unit <= 0:
+        raise _bad(f"{label}.cost.per_unit must be greater than zero", "invalid_cost")
+    cost_ccy = check_currency(value["ccy"], f"{label}.cost.ccy")
+    if cost_ccy == ccy:
+        raise _bad(f"{label}: a lot of {ccy} cannot be priced in {ccy}", "invalid_cost")
+    if amount == 0:
+        raise _bad(f"{label}: a lot needs a non-zero number of units", "invalid_cost")
+    day = parse_date(value["date"], f"{label}.cost.date") if value.get("date") is not None else None
+    return Cost(per_unit, cost_ccy, day)
+
+
 def _parse_postings(value: Any) -> tuple[Posting, ...]:
     if not isinstance(value, list) or len(value) < 2:
         raise _bad("postings must be a list of at least 2 entries", "invalid_postings")
@@ -227,10 +267,10 @@ def _parse_postings(value: Any) -> tuple[Posting, ...]:
         label = f"postings[{index}]"
         if not isinstance(item, dict):
             raise _bad(f"{label} must be an object", "invalid_postings")
-        extra = set(item) - {"account", "amount", "ccy"}
-        if extra & {"cost", "price"}:
+        extra = set(item) - {"account", "amount", "ccy", "cost"}
+        if "price" in extra:
             raise _bad(
-                f"{label}: cost/price are reserved for a future version and not supported yet",
+                f"{label}: `price` is reserved for a future version and not supported yet",
                 "unsupported_field",
             )
         if extra:
@@ -241,13 +281,9 @@ def _parse_postings(value: Any) -> tuple[Posting, ...]:
         account = item["account"]
         if account is not None:
             check_account_name(account, f"{label}.account")
-        out.append(
-            Posting(
-                account=account,
-                amount=parse_amount(item["amount"], f"{label}.amount"),
-                ccy=check_currency(item["ccy"], f"{label}.ccy"),
-            )
-        )
+        ccy = check_currency(item["ccy"], f"{label}.ccy")
+        amount = parse_amount(item["amount"], f"{label}.amount")
+        out.append(Posting(account=account, amount=amount, ccy=ccy, cost=_parse_cost(item.get("cost"), label, ccy, amount)))
     return tuple(out)
 
 

@@ -24,7 +24,7 @@ Money Mom is a **bookkeeping skill** for AI agents (Claude Code, Codex, Cursor, 
 
 It is not another budgeting app. It makes AI bookkeeping **trustworthy**: the AI only understands what you said, and **a program keeps and checks the books**.
 
-> **Status: pre-alpha (`0.1.0a6`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a6"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
+> **Status: pre-alpha (`0.1.0a7`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a7"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
 
 ## One-sentence install
 
@@ -201,6 +201,26 @@ money-mom balance --account Assets --in CNY  # asset accounts converted, with a 
 
 Every command accepts `--json`; exit codes are 0 success, 1 the ledger refused, 2 usage error. Run `money-mom --help`, or see the [command reference](skills/money-mom/references/commands.md).
 
+## Investor pack: holdings, cost and gains
+
+Buying and selling HK and US shares is recorded in **cost lots**: a purchase creates a lot (units, price paid, date); a sale takes from lots first in first out (or last in first out, or highest cost first), and the cost and the realised gain are written into the entry itself, not estimated afterwards.
+
+```bash
+money-mom invest                                              # once per ledger: opens the gains, dividend, fee and tax accounts
+money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1
+money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR    # records which lots, the cost basis, the realised gain
+money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5
+money-mom holdings --lots                                     # units, average cost, price and its source, value, unrealised gain
+money-mom pnl --year 2026                                     # every sale with the lots it took, plus dividends and fees
+money-mom networth --by-account                               # cash, banks, brokers, debts: each converted, with its share of the assets
+money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run   # read a TradeGit journal (read-only)
+```
+
+- **Prices are never made up.** `holdings` uses, in order, the `--mark` you pass, a price you recorded (`rates set AAPL USD 190 --source ...`), then the last trade price (labelled "not a quote"). A position with no price is listed on its own and the totals are marked partial, **never counted as zero**. The program does not go online for share prices.
+- **Broker statements are imported read-only, but this program does not parse broker files.** IBKR and Schwab exports change, and a parser written without real samples is a guess. [TradeGit](https://github.com/rollingSirius/TradeGit) reads them; Money Mom reads its normalised journal (corrections and voids included). For any other broker, the AI reads the statement and submits JSON rows. Options, short sales, zero-price events (expiries) and adjustments are **never guessed** and are listed row by row; a sale of more shares than the ledger holds stops the whole batch and names the row (usually an opening position is missing: `buy ... --opening`). Re-importing is safe.
+- **TWD and other currencies the ECB does not publish:** `rates update` asks a second source (open.er-api.com) for the latest rate of only those currencies, and names the source on every line; `--no-fallback` turns it off.
+- **Not covered:** short selling, options and futures, stock splits and spin-offs (they change the cost of every earlier lot), average-cost accounting, tax advice.
+
 ## Compatible AI agents
 
 The skill follows the open [Agent Skills](https://agentskills.io) standard (`SKILL.md`) and passes the official validator. The same skill is meant to work in Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and other agents that support the standard.
@@ -211,9 +231,9 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · `.xlsx` statements read directly · duplicates across sources (candidates, held rows, you decide) · hash chain (`verify`) · on PyPI · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · `.xlsx` statements read directly · investor pack (cost lots, holdings, realised and unrealised gains, TradeGit journal import, net worth by account) · duplicates across sources (candidates, held rows, you decide) · hash chain (`verify`) · on PyPI · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
 | Next | "Mom" tone levels · verify the Alipay mapping against a real export, and WeChat against more samples |
-| Later | npm launcher · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
+| Later | npm launcher · Claude Code plugin marketplace · Beancount export |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.
 

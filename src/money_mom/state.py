@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .errors import RuleError
+from .inventory import Entry, has_lots, replay
 from .events import Assert, Close, Confirm, Event, Open, Posting, Price, Review, Txn, Void
 
 CHAIN_GENESIS = "money-mom chain v1"
@@ -98,6 +99,7 @@ class LedgerState:
     _ids: set[str] = field(default_factory=set)
     _last_ts: _dt.datetime | None = None
     _import_index: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+    commodities: set[str] = field(default_factory=set)  # symbols that were ever held as lots (shares, fund units)
     chain_head: str = CHAIN_GENESIS
     chain_problems: list[Problem] = field(default_factory=list)
     chained_events: int = 0
@@ -122,6 +124,27 @@ class LedgerState:
         self._ids.add(ev.id)
         self._last_ts = ev.ts
         self.events.append(ev)
+
+    def lot_entries(self, *, skip: str | None = None, replace: dict[str, tuple[Posting, ...]] | None = None) -> list[Entry]:
+        """The posted transactions that touch lots, as replay entries. `skip` leaves one out (a void that has not
+        happened yet); `replace` swaps in new postings (a confirm that has not happened yet)."""
+        out = []
+        for rec in self.txns.values():
+            if rec.status != "posted" or rec.id == skip:
+                continue
+            postings = (replace or {}).get(rec.id, rec.postings)
+            if has_lots(postings):
+                out.append((rec.date, rec.id, postings))
+        return out
+
+    def lots(self, as_of: _dt.date | None = None):
+        """The lots held on `as_of` (default: now), from the live transactions."""
+        return replay(self.lot_entries(), as_of)[0]
+
+    def _check_lots(self, entries: list[Entry]) -> None:
+        problems = replay(entries)[1]
+        if problems:
+            raise RuleError(problems[0], code="lot_error", details={"problems": problems[:5]})
 
     def _advance_chain(self, ev: Event) -> None:
         """Track the hash chain. A mismatch is recorded, never raised: the ledger stays readable and
@@ -269,7 +292,8 @@ class LedgerState:
         if posted:
             sums: dict[str, Decimal] = defaultdict(Decimal)
             for p in postings:
-                sums[p.ccy] += p.amount
+                weight_ccy, weight = p.weight()
+                sums[weight_ccy] += weight
             off = {ccy: str(total) for ccy, total in sums.items() if total != 0}
             if off:
                 raise RuleError(
@@ -356,6 +380,9 @@ class LedgerState:
                     code="duplicate_import",
                     details={"existing": live[0]},
                 )
+        if posted and has_lots(ev.postings):
+            self._check_lots(self.lot_entries() + [(ev.date, ev.id, ev.postings)])
+        self.commodities |= {p.ccy for p in ev.postings if p.cost is not None}
         self.txns[ev.id] = TxnRecord(ev, ev.postings, ev.status)
         if ev.import_hash:
             self._import_index[ev.import_hash].append(ev.id)
@@ -378,6 +405,8 @@ class LedgerState:
         postings = ev.postings if ev.postings is not None else rec.postings
         self._check_postings(rec.date, postings, posted=True)
         self._check_lock(rec.date, postings, ev)
+        if has_lots(postings):
+            self._check_lots(self.lot_entries(replace={rec.id: postings}) + [(rec.date, rec.id, postings)])
         rec.postings = postings
         rec.status = "posted"
         rec.confirm_event_id = ev.id
@@ -389,6 +418,8 @@ class LedgerState:
                 raise RuleError(f"{ev.target} is already voided", code="already_voided")
             if rec.status == "posted":
                 self._check_lock(rec.date, rec.postings, ev)
+                if has_lots(rec.postings):
+                    self._check_lots(self.lot_entries(skip=rec.id))
             rec.status = "voided"
             rec.void_event_id = ev.id
             return

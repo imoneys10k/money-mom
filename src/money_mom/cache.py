@@ -22,7 +22,7 @@ from .errors import LedgerError
 from .state import LedgerState
 
 CACHE_NAME = "cache.sqlite"
-CACHE_LAYOUT = 2
+CACHE_LAYOUT = 3
 
 SCHEMA_SQL = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -43,6 +43,7 @@ CREATE TABLE txns (
 CREATE TABLE postings (
   txn_id TEXT NOT NULL, idx INTEGER NOT NULL, account TEXT,
   amount_text TEXT NOT NULL, amount REAL NOT NULL, ccy TEXT NOT NULL,
+  cost_per_unit TEXT, cost_ccy TEXT, cost_date TEXT,
   PRIMARY KEY (txn_id, idx)
 );
 
@@ -67,6 +68,7 @@ CREATE INDEX txns_date ON txns (date);
 
 CREATE VIEW v_postings AS
   SELECT p.txn_id, p.idx, p.account, p.amount_text, p.amount, p.ccy,
+         p.cost_per_unit, p.cost_ccy, p.cost_date,
          t.date, t.narration, t.payee, t.source_type, t.source_ref, t.confidence,
          t.actor_type, t.actor_name
   FROM postings p JOIN txns t ON t.id = p.txn_id
@@ -135,9 +137,11 @@ def _build(conn: sqlite3.Connection, state: LedgerState, fp: str) -> None:
             ),
         )
         conn.executemany(
-            "INSERT INTO postings VALUES (?,?,?,?,?,?)",
+            "INSERT INTO postings VALUES (?,?,?,?,?,?,?,?,?)",
             [
-                (ev.id, i, p.account, format(p.amount, "f"), float(p.amount), p.ccy)
+                (ev.id, i, p.account, format(p.amount, "f"), float(p.amount), p.ccy,
+                 format(p.cost.per_unit, "f") if p.cost else None, p.cost.ccy if p.cost else None,
+                 (p.cost.date or ev.date).isoformat() if p.cost else None)
                 for i, p in enumerate(rec.postings)
             ],
         )

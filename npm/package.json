@@ -1,7 +1,7 @@
 {
   "name": "money-mom",
-  "version": "0.1.0-alpha.6",
-  "moneyMomVersion": "0.1.0a6",
+  "version": "0.1.0-alpha.7",
+  "moneyMomVersion": "0.1.0a7",
   "description": "Run Money Mom, an append-only, double-entry bookkeeping engine for AI agents, with npx. A thin launcher for the Python package; needs uv.",
   "keywords": [
     "accounting",

@@ -24,7 +24,7 @@ Money Mom 是一个装进 AI agent（Claude Code、Codex、Cursor、Gemini CLI�
 
 它做的不是“又一个记账软件”，而是让 AI 记账这件事**值得信任**：AI 只负责听懂你的话，**账由程序来记、来校验**。
 
-> **状态：pre-alpha（`0.1.0a6`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a6"`），npm 启动器稍后发布，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
+> **状态：pre-alpha（`0.1.0a7`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a7"`），npm 启动器稍后发布，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
 
 ## 一句话安装
 
@@ -201,6 +201,26 @@ money-mom balance --account Assets --in CNY  # 资产账户逐个折算并合计
 
 每个命令都支持 `--json`，退出码 0 成功、1 账本拒绝、2 用法错误。完整命令见 `money-mom --help` 或 [命令参考](skills/money-mom/references/commands.md)。
 
+## 投资者包：持仓、成本与盈亏
+
+港股、美股的买卖按**成本批次**记：买入建立一个批次（份额、买入价、日期），卖出按先进先出（也可选后进先出、最高成本先出）从批次里拿，成本和已实现盈亏直接写进那一笔账里，不事后估算。
+
+```bash
+money-mom invest                                              # 每个账本一次：开设盈亏、股息、手续费、税的账户
+money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1
+money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR    # 记下用了哪几批、成本、已实现盈亏
+money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5
+money-mom holdings --lots                                     # 份额、平均成本、价格及其来源、市值、浮动盈亏
+money-mom pnl --year 2026                                     # 每笔卖出用了哪些批次，加股息与手续费
+money-mom networth --by-account                               # 现金、银行、券商、负债，逐个账户折算，各占资产多少
+money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run   # 读取 TradeGit 日志（只读）
+```
+
+- **价格从不编造。** `holdings` 依次用你给的 `--mark`、你记下的价格（`rates set AAPL USD 190 --source ...`）、最后一笔成交价（并标明“不是行情”）；没有价格的持仓单独列出，总数标为不完整，**不会当作零**。程序不联网取股价。
+- **券商流水只读导入，但不自己解析券商文件。** IBKR、嘉信的导出格式会变，没有真实样本的解析器就是猜；这些由 [TradeGit](https://github.com/rollingSirius/TradeGit) 读取，Money Mom 读取它规范化后的日志（含更正与作废）。其他券商，让 AI 读账单后以 JSON 行提交。期权、卖空、零价事件（如到期）、调整等**不会被猜**，逐条列出；卖出超过账本里的持仓会让整批停下并指出哪一行（通常缺一个期初持仓：`buy ... --opening`）。重复导入是安全的。
+- **台币等欧洲央行没有的币种**：`rates update` 会向第二个来源（open.er-api.com）只询问这些币种的最新汇率，输出里逐条标明来源；`--no-fallback` 可关闭。
+- **不覆盖：** 卖空、期权与期货、拆股与分拆（会改变此前所有批次的成本）、平均成本法、税务建议。
+
 ## 兼容的 AI agent
 
 Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标准（`SKILL.md`），已通过官方校验器。同一份 skill 可用于 Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot 等支持该标准的 agent。
@@ -211,9 +231,9 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 | | |
 |---|---|
-| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报与图表 · 订阅与异常提醒 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· `.xlsx` 账单直接导入 · 跨来源防重复（候选、挂起、由你判断）· 哈希链防篡改（`verify`）· 发布到 PyPI· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
+| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报与图表 · 订阅与异常提醒 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· `.xlsx` 账单直接导入 · 投资者包（成本批次、持仓、已实现与浮动盈亏、读取 TradeGit 日志、逐账户净资产）· 跨来源防重复（候选、挂起、由你判断）· 哈希链防篡改（`verify`）· 发布到 PyPI· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
 | 下一步 | “妈妈”语气档位 · 用真实导出文件验证支付宝映射，再多验证几份微信导出 |
-| 之后 | 发布 npm 启动器 · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
+| 之后 | 发布 npm 启动器 · Claude Code 插件市场 · Beancount 导出 |
 
 不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。
 

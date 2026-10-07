@@ -5,7 +5,7 @@ license: MIT
 compatibility: Needs the money-mom command (Python 3.11+, installed with uv). All data stays on the user's computer. Installation steps are in INSTALL.md of https://github.com/imoneys10k/money-mom
 metadata:
   author: imoneys10k
-  version: "0.1.0a6"
+  version: "0.1.0a7"
 ---
 
 # Money Mom
@@ -303,9 +303,41 @@ Both rows are voided (nothing is deleted) and one real transfer between the two 
 
 Every event carries a hash of everything before it. `money-mom verify` (also part of `check` and `doctor`) reports an event that was edited, removed or added by hand after it was written. Run it when something looks off, or before a reconciliation the user cares about. It **cannot** prove that nobody rewrote the whole file and recomputed every hash; for that, the user can note the `head` it prints somewhere else and compare later. Events written before this feature existed are not protected until the next write chains over them. Nothing leaves the computer.
 
+## 5d. Investing: shares, cost and gains
+
+For stocks and ETFs (HK and US included). A purchase creates a **lot** (units, the price paid, the day); a sale takes from lots, **first in first out** unless told otherwise (`--lots lifo|hifo`), and the realised gain is written into the entry. Fees and tax withheld are expenses, shown next to the gain, not inside it. Nothing here touches a broker or moves money: you record what the user says happened.
+
+```bash
+money-mom invest                                 # once per ledger: opens the gains, dividend, fee and tax accounts
+money-mom buy 10 AAPL --price 150 --ccy USD --account IBKR --fee 1 --date 2026-02-02 --actor agent:claude-code --confidence 0.95 --json
+money-mom sell 4 AAPL --price 170 --ccy USD --account IBKR --date 2026-05-02 --actor agent:claude-code --confidence 0.95 --json
+money-mom dividend 25 AAPL --to IBKR --ccy USD --tax 2.5 --date 2026-04-10 --actor agent:claude-code --confidence 0.95 --json
+money-mom buy 100 AAPL --price 50 --ccy USD --account IBKR --date 2026-01-05 --opening   # shares already held: cost from the opening-balances account, no cash moves
+money-mom holdings --lots                        # units, average cost, price and where it came from, value, unrealised gain
+money-mom pnl --year 2026                        # every sale with the lots it took, plus dividends and fees
+```
+
+- **Always pass `--ccy`.** It is never guessed. The account that holds the shares also holds the cash unless `--cash ACCOUNT` says otherwise.
+- **Prices.** `holdings` uses, in this order, `--mark SYMBOL=PRICE[:CCY]` (today only, not recorded), a stored price (`money-mom rates set AAPL USD 190 --source "broker app"`), then the price of the last trade, which it labels `last trade`: that is not a market quote, say so. A position with no price is listed unpriced and marks the totals `partial`; never present it as worth zero. No network is used for prices; ask the user, or read it from their statement.
+- **Unrealised gain** needs the price in the cost currency, or a stored rate between the two; otherwise it is `null`, not guessed.
+- **A sale of more than is held is refused** (`not_enough_shares`); the usual cause is a missing opening position. Voiding a purchase whose shares were sold is refused (`lot_error`): void the sale first.
+- **Net worth account by account:** `money-mom networth --by-account`. Shares are valued at a stored price; an account holding something unpriced is `partial`.
+- **Not covered, say so:** short selling, options and futures, stock splits and spin-offs (they change the cost of every earlier lot), average-cost accounting, tax advice. Do not improvise them with `add`.
+
+**Importing trades.** The program does not parse broker files. If the user keeps a TradeGit journal, import it (read-only): `money-mom trades import ~/.tradegit/repo/journal --account IBKR --dry-run`, show the user the preview (`unsupported` rows are never guessed: options, shorts, expiries, adjustments), then run it without `--dry-run`. Several source accounts: `--account-map ibkr-main=Assets:IBKR --account-map schwab-ira=Assets:Schwab`. For any other statement, read it yourself and pass rows:
+
+```bash
+money-mom trades import - --format json --account IBKR --actor agent:claude-code --confidence 0.9 <<'EOF'
+[{"date": "2026-02-02", "type": "buy", "symbol": "0700.HK", "units": "100", "price": "300", "ccy": "HKD", "fee": "5", "id": "stmt-2026-02-r1"},
+ {"date": "2026-03-05", "type": "dividend", "symbol": "0700.HK", "amount": "80", "ccy": "HKD", "id": "stmt-2026-03-r2"}]
+EOF
+```
+
+`type` is buy, sell, dividend, interest, fee, tax, deposit or withdrawal. Give every row a stable `id`: re-importing is then safe. A deposit or withdrawal waits as pending until the user says which of their own accounts the money came from or went to. If any row cannot be recorded (a sale of shares the ledger does not hold, an account that did not exist yet), nothing is written and the row is named.
+
 ## 6. Not covered yet
 
-There are no `refund`, lending or investment (holdings, cost basis, gains) commands yet. For a refund, show the user the reversed postings and, if they agree, record them with `add --posting` (money back into the account, expense reduced). For anything else, say it is not supported yet instead of improvising.
+There are no `refund` or lending commands yet. For a refund, show the user the reversed postings and, if they agree, record them with `add --posting` (money back into the account, expense reduced). For anything else, say it is not supported yet instead of improvising.
 
 ## 7. When a command is refused
 
@@ -318,6 +350,10 @@ Exit code 1 means the ledger said no; 2 means the command line was wrong. With `
 | `confidence_required`, `confidence_too_low` | Pass an honest `--confidence`; below the threshold record it as pending. |
 | `duplicate_import` | Already recorded. Tell the user; do not force it. (`import run` skips repeats by itself.) |
 | `user_decision_required` | A judgement about a duplicate is the user's. Ask them, then pass their answer with `--user-said`. |
+| `not_enough_shares`, `lot_error` | A sale takes more shares than the lot holds, or a void would leave sold shares without a purchase. Check `holdings --lots`; an opening position is often missing. |
+| `no_investment_accounts` | Run `money-mom invest` once to open them. |
+| `currency_mismatch` | The sale currency differs from the currency the shares were bought in. Ask the user. |
+| `invalid_trades` | Some imported rows cannot be recorded; nothing was written. The message names the first row. |
 | `invalid_review` | `--same` needs `--keep` (one of the two ids); `--different` and `--transfer` take no `--keep`; `--transfer` needs two simple entries on different accounts with opposite amounts. |
 | `invalid_statement` | The file could not be read; the message names the lines. Check the mapping with `import inspect`, or `--encoding`. |
 | `invalid_mapping`, `unknown_mapping` | The mapping is invalid or not saved. Fix the TOML and `import save-map` it again. |

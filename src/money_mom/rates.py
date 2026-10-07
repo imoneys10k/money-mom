@@ -27,6 +27,8 @@ from .state import LedgerState
 
 FRANKFURTER_URL = "https://api.frankfurter.dev/v1"
 FRANKFURTER_REF = "api.frankfurter.dev (ECB reference rate)"
+OPEN_ER_URL = "https://open.er-api.com/v6/latest"
+OPEN_ER_REF = "open.er-api.com (rates by exchangerate-api.com, open access)"
 STALE_AFTER_DAYS = 7
 _ZERO_DECIMALS = frozenset({"JPY", "KRW", "VND", "ISK", "CLP"})
 
@@ -68,9 +70,12 @@ def _one_way(
 
 
 def find_rate(
-    state: LedgerState, base: str, quote: str, on: _dt.date, *, pivot: str | None = None
+    state: LedgerState, base: str, quote: str, on: _dt.date, *, pivot: str | None = None, _depth: int = 0
 ) -> RateInfo | None:
-    """How many `quote` one `base` was worth on `on`, from stored rates only. None if there is no rate."""
+    """How many `quote` one `base` was worth on `on`, from stored rates only. None if there is no rate.
+
+    A held commodity (a share) is priced in some currency with a stored price (`rates set AAPL USD 190 ...`);
+    asking for it in another currency goes through that one."""
     if base == quote:
         return RateInfo(Decimal(1), on, "identity", False, 0)
     table = state.effective_prices()
@@ -85,6 +90,14 @@ def find_rate(
             day = min(first[1], second[1])
             age = (on - day).days
             return RateInfo(first[0] * second[0], day, f"via {pivot}", age > STALE_AFTER_DAYS, age)
+    if _depth == 0 and base in state.commodities:
+        for priced_in in sorted({q for (b, q) in table if b == base and q not in (base, quote)}):
+            first = _one_way(table, base, priced_in, on)
+            second = find_rate(state, priced_in, quote, on, pivot=pivot, _depth=1)
+            if first and second:
+                day = min(first[1], second.rate_date)
+                age = (on - day).days
+                return RateInfo(first[0] * second.rate, day, f"via {priced_in}", age > STALE_AFTER_DAYS, age)
     return None
 
 
@@ -108,6 +121,7 @@ class Fetched:
     quote: str
     date: _dt.date
     rate: str  # exact decimal text as the source published it
+    source: str = FRANKFURTER_REF
 
 
 class RateUnsupported(Exception):
@@ -152,6 +166,47 @@ def fetch_frankfurter(
     return Fetched(base, quote, parsed_date, rate)
 
 
+def fetch_open_er(
+    base: str, quote: str, on: _dt.date | None = None, *, opener: Opener = urllib.request.urlopen, timeout: float = 10
+) -> Fetched:
+    """The latest rate from the open-access ExchangeRate-API, used only for currencies the ECB does not publish
+    (TWD, for one). It has no history, so a request for an earlier day is reported as unsupported rather than
+    answered with today's rate."""
+    check_currency(base)
+    check_currency(quote)
+    if on is not None and on < _dt.date.today():
+        raise RateUnsupported(f"{base}->{quote}: the fallback source has no history")
+    request = urllib.request.Request(
+        f"{OPEN_ER_URL}/{base}", headers={"User-Agent": f"money-mom/{__version__}", "Accept": "application/json"},
+    )
+    try:
+        with opener(request, timeout=timeout) as response:
+            body = response.read(1_000_000)
+    except urllib.error.HTTPError as err:
+        if err.code in (404, 422):
+            raise RateUnsupported(f"{base}->{quote}") from None
+        raise LedgerError(f"the fallback rate source answered HTTP {err.code}", code="rates_unavailable") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
+        reason = getattr(err, "reason", err)
+        raise LedgerError(f"could not reach the fallback rate source: {reason}", code="rates_unavailable") from None
+    try:
+        data = json.loads(body, parse_float=str, parse_int=str)
+        if data.get("result") != "success" or data.get("base_code") != base:
+            raise RateUnsupported(f"{base}->{quote}")
+        rate = data["rates"].get(quote)
+        if rate is None:
+            raise RateUnsupported(f"{base}->{quote}")
+        from email.utils import parsedate_to_datetime
+        published = parsedate_to_datetime(data["time_last_update_utc"]).date()
+        if not isinstance(rate, str) or parse_amount(rate, "rate") <= 0:
+            raise ValueError("rate must be positive")
+    except RateUnsupported:
+        raise
+    except (ValueError, KeyError, TypeError, AttributeError, LedgerError):
+        raise LedgerError("the fallback rate source sent an answer that could not be understood", code="rates_unavailable") from None
+    return Fetched(base, quote, published, rate, OPEN_ER_REF)
+
+
 Fetcher = Callable[[str, str, "_dt.date | None"], Fetched]
 
 
@@ -161,6 +216,7 @@ def update_rates(
     on: _dt.date | None = None,
     currencies: list[str] | None = None,
     fetch: Fetcher = fetch_frankfurter,
+    fallback: Fetcher | None = None,
     actor: tuple[str, str] = ("human", "user"),
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -187,12 +243,18 @@ def update_rates(
         try:
             fetched.append(fetch(ccy, base, on))
         except RateUnsupported:
-            unsupported.append(ccy)
+            if fallback is None:
+                unsupported.append(ccy)
+                continue
+            try:  # only a currency the primary source does not publish is asked of the second one
+                fetched.append(fallback(ccy, base, on))
+            except RateUnsupported:
+                unsupported.append(ccy)
     table = ledger.state.effective_prices()
     recorded, unchanged, events = [], [], []
     for item in fetched:
         existing = table.get((item.base, item.quote), {}).get(item.date)
-        entry = {"base": item.base, "quote": item.quote, "date": item.date.isoformat(), "rate": item.rate}
+        entry = {"base": item.base, "quote": item.quote, "date": item.date.isoformat(), "rate": item.rate, "source": item.source}
         if existing is not None and existing.event.rate == parse_amount(item.rate):
             unchanged.append(entry)
             continue
@@ -200,13 +262,14 @@ def update_rates(
         events.append(
             ledger.new_event(
                 "price", actor=actor, date=item.date.isoformat(), base=item.base, quote=item.quote,
-                rate=item.rate, source={"type": "import", "ref": FRANKFURTER_REF},
+                rate=item.rate, source={"type": "import", "ref": item.source},
             )
         )
     if events and not dry_run:
         ledger.append_many(events, clamp_ts=True)
     return {
-        "base_currency": base, "source": FRANKFURTER_REF, "written": bool(events) and not dry_run,
+        "base_currency": base, "source": FRANKFURTER_REF, "sources": sorted({i.source for i in fetched}),
+        "written": bool(events) and not dry_run,
         "recorded": recorded, "unchanged": unchanged, "unsupported": unsupported,
         "checked": targets,
     }

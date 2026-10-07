@@ -9,11 +9,11 @@ If a user asked you to install Money Mom, follow this file from top to bottom.
 - Before each step that changes the machine, tell the user in one sentence what you are about to do. Ask first for steps marked **[ask]**.
 - Never use `sudo`. Never skip the checksum or the verification steps. Never pipe a download into a shell except the official `uv` installer in Step 2a, and only after the user agreed.
 - If a step fails, stop and report the exact error. Do not look for a way around a failed check.
-- Money Mom is pre-release software (`0.1.0a6`). Say so to the user.
+- Money Mom is pre-release software (`0.1.0a7`). Say so to the user.
 
 ## What gets installed
 
-1. **The `money-mom` command**: a pinned release (`0.1.0a6`), a Python wheel downloaded from this repository's GitHub release and verified against a SHA-256 checksum below.
+1. **The `money-mom` command**: a pinned release (`0.1.0a7`), a Python wheel downloaded from this repository's GitHub release and verified against a SHA-256 checksum below.
 2. **The `money-mom` skill**: instructions for you, copied into your agent's skills folder.
 3. **Optionally a ledger folder** (default `~/MoneyMom`): plain text files that hold the user's books.
 
@@ -26,7 +26,7 @@ money-mom --version
 uv --version
 ```
 
-If `money-mom --version` already prints `0.1.0a6`, skip to Step 3.
+If `money-mom --version` already prints `0.1.0a7`, skip to Step 3.
 
 ## Step 2. Install the command
 
@@ -41,26 +41,26 @@ If the user would rather not install `uv`, use the pip route in 2d (needs Python
 
 ### 2b. Download the wheel and check it
 
-The release asset is `money_mom-0.1.0a6-py3-none-any.whl` (the same file is on PyPI as `money-mom==0.1.0a6`). Its SHA-256 is:
+The release asset is `money_mom-0.1.0a7-py3-none-any.whl` (the same file is on PyPI as `money-mom==0.1.0a7`). Its SHA-256 is:
 
 ```
-4e8786e35ea169f758ccb461d74c48b1c1185d5c2cce90ac8abccfe65327d92e
+c46228d4b82c8cb75e2d33a26601b3349141c0c56f7ba215fd6488c6f505c42c
 ```
 
 macOS and Linux:
 
 ```bash
 cd "$(mktemp -d)"
-curl -fsSLO https://github.com/imoneys10k/money-mom/releases/download/v0.1.0a6/money_mom-0.1.0a6-py3-none-any.whl
-echo "4e8786e35ea169f758ccb461d74c48b1c1185d5c2cce90ac8abccfe65327d92e  money_mom-0.1.0a6-py3-none-any.whl" | shasum -a 256 -c -
+curl -fsSLO https://github.com/imoneys10k/money-mom/releases/download/v0.1.0a7/money_mom-0.1.0a7-py3-none-any.whl
+echo "c46228d4b82c8cb75e2d33a26601b3349141c0c56f7ba215fd6488c6f505c42c  money_mom-0.1.0a7-py3-none-any.whl" | shasum -a 256 -c -
 ```
 
 (On Linux without `shasum`, use `sha256sum -c -`.) Windows (PowerShell):
 
 ```powershell
 cd (New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid())))
-curl.exe -fsSLO https://github.com/imoneys10k/money-mom/releases/download/v0.1.0a6/money_mom-0.1.0a6-py3-none-any.whl
-(Get-FileHash .\money_mom-0.1.0a6-py3-none-any.whl -Algorithm SHA256).Hash.ToLower()   # must equal the value above
+curl.exe -fsSLO https://github.com/imoneys10k/money-mom/releases/download/v0.1.0a7/money_mom-0.1.0a7-py3-none-any.whl
+(Get-FileHash .\money_mom-0.1.0a7-py3-none-any.whl -Algorithm SHA256).Hash.ToLower()   # must equal the value above
 ```
 
 **If the checksum does not match, stop.** Tell the user and do not install.
@@ -68,7 +68,7 @@ curl.exe -fsSLO https://github.com/imoneys10k/money-mom/releases/download/v0.1.0
 ### 2c. Install it
 
 ```bash
-uv tool install ./money_mom-0.1.0a6-py3-none-any.whl
+uv tool install ./money_mom-0.1.0a7-py3-none-any.whl
 money-mom --version
 ```
 
@@ -79,7 +79,7 @@ If `money-mom` is not found, the tool folder is not on `PATH`. Run `uv tool upda
 Needs Python 3.11 or newer (`python3 --version`). From the folder holding the verified wheel:
 
 ```bash
-python3 -m pip install --user ./money_mom-0.1.0a6-py3-none-any.whl
+python3 -m pip install --user ./money_mom-0.1.0a7-py3-none-any.whl
 ```
 
 ## Step 3. Install the skill
@@ -97,10 +97,10 @@ DISABLE_TELEMETRY=1 npx -y skills add imoneys10k/money-mom --skill money-mom -g 
 ### Method B: copy the folder (no Node.js)
 
 ```bash
-git clone --depth 1 --branch v0.1.0a6 https://github.com/imoneys10k/money-mom.git "$(mktemp -d)/mm"
+git clone --depth 1 --branch v0.1.0a7 https://github.com/imoneys10k/money-mom.git "$(mktemp -d)/mm"
 ```
 
-(git may print `refs/tags/v0.1.0a6 ... is not a commit!`; that is only a warning about the annotated tag and the clone still succeeds), then copy `skills/money-mom/` from that clone to:
+(git may print `refs/tags/v0.1.0a7 ... is not a commit!`; that is only a warning about the annotated tag and the clone still succeeds), then copy `skills/money-mom/` from that clone to:
 
 | Agent | Folder |
 |---|---|
