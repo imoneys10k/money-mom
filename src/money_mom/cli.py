@@ -11,6 +11,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import unicodedata
 from decimal import Decimal
@@ -298,10 +299,32 @@ def _intent_handler(kind: str) -> Callable[[argparse.Namespace], tuple[Any, str]
     return handler
 
 
+_PLAIN_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _split_exchange(parts: list[str]) -> tuple[str, str]:
+    """`100 USD 720 CNY`, `'100 USD' '720 CNY'`, `100 USD 720` and `100 720 CNY` all mean the same kind of thing."""
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    if len(parts) == 4:
+        return f"{parts[0]} {parts[1]}", f"{parts[2]} {parts[3]}"
+    if len(parts) == 3:
+        first, middle, last = parts
+        if not _PLAIN_NUMBER.fullmatch(middle):
+            return f"{first} {middle}", last
+        if not _PLAIN_NUMBER.fullmatch(last):
+            return first, f"{middle} {last}"
+    raise UsageError(
+        "give the two amounts, each optionally followed by its currency: 100 USD 720 CNY, '100 USD' '720 CNY', "
+        "or 100 720 with --give-ccy and --get-ccy"
+    )
+
+
 def cmd_exchange(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
+    give, get = _split_exchange(args.parts)
     result = record_exchange(
-        ledger, give=args.give, get=args.get, slots={"from": args.slot_from, "to": args.slot_to},
+        ledger, give=give, get=get, slots={"from": args.slot_from, "to": args.slot_to},
         date=args.date or _today(), give_ccy=args.give_ccy, get_ccy=args.get_ccy, payee=args.payee,
         narration=args.narration, confidence=args.confidence, source=_source(args), import_hash=args.import_hash,
         actor=_actor(args), strict=args.strict, dry_run=args.dry_run, meta=_override_meta(args),
@@ -408,9 +431,12 @@ def _converted_text(result: dict[str, Any]) -> str:
         for r in result["balances"]
     ]
     text = _table(["account", "amount", "ccy", f"in {result['in']}", "rate"], rows) if rows else "No balances."
-    text += f"\nTotal in {result['in']}: {result['total']}" + (" (PARTIAL)" if result["partial"] else "")
+    if result["total"] is not None:
+        text += f"\nTotal in {result['in']}: {result['total']}" + (" (PARTIAL)" if result["partial"] else "")
+    else:
+        text += "\n  No total: all accounts together always net to zero. Use --account Assets, or `money-mom networth`."
     if result["missing"]:
-        text += f"\n  No rate for {', '.join(result['missing'])}: left out of the total. Run `money-mom rates update`."
+        text += f"\n  No rate for {', '.join(result['missing'])}: left out. Run `money-mom rates update`."
     if result["stale"]:
         text += f"\n  Rates for {', '.join(result['stale'])} are more than 7 days old."
     return text
@@ -429,6 +455,9 @@ def cmd_balance(args: argparse.Namespace) -> tuple[Any, str]:
             if (not prefix or key[0] == prefix or key[0].startswith(prefix + ":")) and (amount != 0 or args.all)
         }
         result = convert_balances(ledger.state, kept, target[0], as_of or dt.date.today(), pivot=ledger.base_currency)
+        if not prefix:  # every account together always sums to zero, so a total would mean nothing
+            result["total"] = None
+            result["note"] = "total omitted: all accounts together always net to zero; filter with --account or use networth"
         return result, _converted_text(result)
     prefix = args.account
     rows = []
@@ -688,8 +717,8 @@ def _build_parser() -> argparse.ArgumentParser:
         lock_flag(p)
 
     p = command("exchange", cmd_exchange, "record a currency exchange: money in one currency leaves an account and the same worth in another arrives. Recorded through an Equity conversion account; nothing is fetched")
-    p.add_argument("give", help="what you gave, e.g. '100 USD' or 100 (the currency can come from the account)")
-    p.add_argument("get", help="what you got, e.g. '720 CNY'")
+    p.add_argument("parts", nargs="+", metavar="AMOUNT [CCY] AMOUNT [CCY]",
+                   help="what you gave, then what you got: 100 USD 720 CNY, or '100 USD' '720 CNY', or 100 720 when the accounts or --give-ccy/--get-ccy say the currencies")
     p.add_argument("--from", dest="slot_from", metavar="ACCOUNT", help="account the money you gave leaves")
     p.add_argument("--to", dest="slot_to", metavar="ACCOUNT", help="account the money you got arrives in")
     p.add_argument("--give-ccy", help="currency of what you gave, as a code or word (avoids shell quoting of $)")

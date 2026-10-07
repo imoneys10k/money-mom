@@ -19,9 +19,9 @@
 8. **打标签并发布**，附上构建好的 wheel（必须是第 4 步那一个）：
 
    ```bash
-   git tag -a v0.1.0a1 -m "v0.1.0a1"
-   git push origin v0.1.0a1
-   gh release create v0.1.0a1 dist/*.whl --prerelease --title "v0.1.0a1" --notes-file <说明文件>
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   gh release create vX.Y.Z dist/*.whl --prerelease --title "vX.Y.Z" --notes-file <说明文件>
    ```
 
 9. **验证发布物**：从 Release 下载 wheel，确认哈希与 `INSTALL.md` 一致；在隔离环境（临时 `HOME`、`UV_TOOL_DIR`）里按 `INSTALL.md` 走一遍。

@@ -148,6 +148,7 @@
     <nav class="links" aria-label="main">
       <a class="hide-sm" href="#trust"><span class="zh">为什么可信</span><span class="en">Why trust it</span></a>
       <a class="hide-sm" href="#how"><span class="zh">工作原理</span><span class="en">How it works</span></a>
+      <a class="hide-sm" href="#currencies"><span class="zh">多币种</span><span class="en">Currencies</span></a>
       <a href="#install"><span class="zh">安装</span><span class="en">Install</span></a>
       <a class="hide-sm" href="#status"><span class="zh">状态</span><span class="en">Status</span></a>
       <a href="https://github.com/imoneys10k/money-mom">GitHub</a>
@@ -208,7 +209,7 @@
       <div class="card"><h3><span class="zh">只追加，不改历史</span><span class="en">Append-only</span></h3><p><span class="zh">记错了不擦掉，而是作废并重记。来源、置信度、谁写的，都留着。</span><span class="en">A mistake is voided and re-recorded, never erased. Source, confidence and author are always kept.</span></p></div>
       <div class="card"><h3><span class="zh">从不靠猜</span><span class="en">Never guesses</span></h3><p><span class="zh">含糊的账户名整笔记为“待确认”，并列出候选。AI 的置信度低于 0.9 也先等你确认。</span><span class="en">A vague account name makes the entry pending, with candidates listed. An AI confidence below 0.9 also waits for you.</span></p></div>
       <div class="card"><h3><span class="zh">对账后锁定</span><span class="en">Locked once reconciled</span></h3><p><span class="zh">核对过银行余额的时期被锁定，回头改只能由你本人写明原因。</span><span class="en">A period checked against the bank is locked. Changing it takes you, in person, with a written reason.</span></p></div>
-      <div class="card"><h3><span class="zh">本地优先</span><span class="en">Local-first</span></h3><p><span class="zh">数据留在你的电脑上，是人能读的纯文本。程序本身不联网，没有运行时依赖。</span><span class="en">Your data stays on your machine as readable text. The program never touches the network and has no runtime dependencies.</span></p></div>
+      <div class="card"><h3><span class="zh">本地优先</span><span class="en">Local-first</span></h3><p><span class="zh">数据留在你的电脑上，是人能读的纯文本。程序默认不联网、没有运行时依赖；只有你主动取汇率时才联网。</span><span class="en">Your data stays on your machine as readable text. The program does not use the network by default and has no runtime dependencies; only fetching rates, which you run yourself, goes online.</span></p></div>
     </div>
   </div>
 </section>
@@ -244,7 +245,23 @@ money-mom confirm &lt;ID&gt; --category 餐饮:聚餐
   </div>
 </section>
 
-<section id="install" class="alt">
+<section id="currencies" class="alt">
+  <div class="wrap">
+    <div class="kicker"><span class="zh">多币种</span><span class="en">Many currencies</span></div>
+    <h2><span class="zh">不必固定一个币种。</span><span class="en">Not tied to one currency.</span></h2>
+    <p class="sub"><span class="zh">美元、港币、人民币混着用也没关系：币种能认出来，认不出来就问你，折算可以一直追溯到汇率的来源。</span><span class="en">Dollars, Hong Kong dollars and yuan side by side are fine: the currency is recognised, asked about when unclear, and every conversion traces back to where its rate came from.</span></p>
+    <div class="cards">
+      <div class="card"><h3><span class="zh">认得出币种</span><span class="en">Recognises the currency</span></h3><p><span class="zh">5美元、HK$200、USD 5、1,200元都行。遇到有歧义的 $ 和 ¥，先看账户，再看账本；还不确定就问你，从不靠猜。</span><span class="en">5 USD, HK$200, 5美元 or 1,200元 all work. For an ambiguous $ or ¥ the accounts decide first, then your ledger; if it is still unclear it asks, and never guesses.</span></p></div>
+      <div class="card"><h3><span class="zh">换汇与折算</span><span class="en">Exchange and conversion</span></h3><p><span class="zh"><code>exchange</code> 记下你实际成交的汇率；<code>networth</code> 把所有币种折成一个总额。缺汇率的币种会明确列出，不会悄悄丢掉。</span><span class="en"><code>exchange</code> keeps the rate you actually got; <code>networth</code> turns every currency into one total. A currency with no rate is listed, never silently dropped.</span></p></div>
+      <div class="card"><h3><span class="zh">联网只在你开口时</span><span class="en">Online only when you ask</span></h3><p><span class="zh"><code>rates update</code> 取欧洲央行的每日参考汇率，只发送币种代码和日期。汇率连同来源存进账本，之后折算完全离线。这不是实时行情。</span><span class="en"><code>rates update</code> fetches the ECB's daily reference rates and sends only currency codes and a date. Each rate is stored with its source, so conversion afterwards is fully offline. It is not a live feed.</span></p></div>
+    </div>
+    <pre class="code" style="margin-top:24px">money-mom exchange 100 USD 720 CNY --from 美元户 --to 银行卡
+money-mom rates update
+money-mom networth</pre>
+  </div>
+</section>
+
+<section id="install">
   <div class="wrap">
     <div class="kicker"><span class="zh">安装</span><span class="en">Install</span></div>
     <h2><span class="zh">对你的 AI 说一句话。</span><span class="en">Say one sentence to your AI.</span></h2>
@@ -281,7 +298,7 @@ money-mom confirm &lt;ID&gt; --category 餐饮:聚餐
         <li><span class="zh">跑一次不写入的自检，确认一切正常。</span><span class="en">Runs a self-check that writes nothing.</span></li>
       </ol>
     </div>
-    <p class="note"><span class="zh">目前是预发布版本（0.1.0a1）：还没有上 PyPI / npm，不要把唯一的账放在它上面。</span><span class="en">This is a pre-release (0.1.0a1): not on PyPI or npm yet. Don't keep your only copy of the books in it.</span></p>
+    <p class="note"><span class="zh">目前是预发布版本（0.1.0a2）：还没有上 PyPI / npm，不要把唯一的账放在它上面。</span><span class="en">This is a pre-release (0.1.0a2): not on PyPI or npm yet. Don't keep your only copy of the books in it.</span></p>
 
     <div class="chips" aria-label="agents">
       <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">Cursor</span><span class="chip">Gemini CLI</span><span class="chip">GitHub Copilot</span>
@@ -291,7 +308,7 @@ money-mom confirm &lt;ID&gt; --category 餐饮:聚餐
   </div>
 </section>
 
-<section id="status">
+<section id="status" class="alt">
   <div class="wrap">
     <div class="kicker"><span class="zh">状态</span><span class="en">Status</span></div>
     <h2><span class="zh">pre-alpha：核心可用，其余在路上。</span><span class="en">Pre-alpha: the core works, the rest is on the way.</span></h2>
@@ -300,6 +317,7 @@ money-mom confirm &lt;ID&gt; --category 餐饮:聚餐
         <li><span class="zh">账本内核：复式、只追加、对账锁定</span><span class="en">Ledger core: double-entry, append-only, locking</span></li>
         <li><span class="zh">命令行与 SQL 查账</span><span class="en">Command line and SQL queries</span></li>
         <li><span class="zh">意图层：spend / income / transfer</span><span class="en">Intents: spend / income / transfer</span></li>
+        <li><span class="zh">多币种：识别、汇率折算、换汇</span><span class="en">Many currencies: recognition, rate conversion, exchange</span></li>
         <li><span class="zh">中英文账户树模板</span><span class="en">Chinese and English account templates</span></li>
         <li><span class="zh">skill、安装说明、doctor</span><span class="en">Skill, install guide, doctor</span></li>
         <li><span class="zh">三系统 CI</span><span class="en">CI on Linux, macOS, Windows</span></li></ul></div>
@@ -312,7 +330,7 @@ money-mom confirm &lt;ID&gt; --category 餐饮:聚餐
         <li><span class="zh">发布到 PyPI / npm</span><span class="en">PyPI and npm</span></li>
         <li><span class="zh">Claude Code 插件市场</span><span class="en">Claude Code plugin marketplace</span></li>
         <li><span class="zh">Beancount 导出</span><span class="en">Beancount export</span></li>
-        <li><span class="zh">投资者包：多币种、港美股、净资产</span><span class="en">Investor pack: multi-currency, HK/US holdings, net worth</span></li></ul></div>
+        <li><span class="zh">投资者包：港美股持仓与成本、盈亏</span><span class="en">Investor pack: HK/US holdings, cost basis, gains</span></li></ul></div>
     </div>
     <p class="note"><span class="zh">不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。</span><span class="en">What it will not do: move money or place orders, store bank credentials, or go beyond read-only import of bank and broker data.</span></p>
   </div>

@@ -188,6 +188,25 @@ class Cli(CliTestCase):
         self.assertEqual(balances[("Assets:美元户", "USD")], "4890")
         self.assertEqual(balances[("Assets:银行卡", "CNY")], "792")
 
+    def test_the_natural_unquoted_forms_all_work(self):
+        forms = [
+            ("100", "USD", "720", "CNY"), ("100 USD", "720 CNY"), ("100", "USD", "720"), ("100", "720", "CNY"),
+        ]
+        for parts in forms:
+            data = self.js("exchange", *parts, "--from", "美元户", "--to", "银行卡")["data"]
+            self.assertEqual(
+                (data["details"]["give"], data["details"]["get"]),
+                ({"amount": "100", "ccy": "USD"}, {"amount": "720", "ccy": "CNY"}), parts,
+            )
+
+    def test_the_wrong_number_of_pieces_is_a_usage_error(self):
+        for parts in (("100",), ("100", "USD", "720", "CNY", "x"), ("100", "720", "800")):
+            data = self.js("exchange", *parts, "--from", "美元户", "--to", "银行卡", expect=2)
+            self.assertEqual(data["error"]["code"], "usage_error", parts)
+        # three pieces that group sensibly but make no amount are a bad amount, not a bad command line
+        data = self.js("exchange", "100", "USD", "CNY", "--from", "美元户", "--to", "银行卡", expect=1)
+        self.assertEqual(data["error"]["code"], "invalid_amount")
+
     def test_flags_avoid_shell_quoting_of_dollar_signs(self):
         data = self.js("exchange", "100", "720", "--give-ccy", "USD", "--get-ccy", "CNY", "--from", "美元户", "--to", "银行卡")["data"]
         self.assertEqual((data["details"]["give"]["ccy"], data["details"]["get"]["ccy"]), ("USD", "CNY"))

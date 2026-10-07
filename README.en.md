@@ -24,7 +24,7 @@ Money Mom is a **bookkeeping skill** for AI agents (Claude Code, Codex, Cursor, 
 
 It is not another budgeting app. It makes AI bookkeeping **trustworthy**: the AI only understands what you said, and **a program keeps and checks the books**.
 
-> **Status: pre-alpha (`0.1.0a1`).** The ledger core, the command line and the skill work and are tested. It is not on PyPI or npm yet, and reconciliation, statement import and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
+> **Status: pre-alpha (`0.1.0a2`).** The ledger core, the command line and the skill work and are tested. It is not on PyPI or npm yet, and reconciliation, statement import and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
 
 ## One-sentence install
 
@@ -63,7 +63,7 @@ Mom   612 more than last month, mostly one 486 dinner on the 20th. Every number 
 | **Append-only** | A mistake is voided and re-recorded, never erased. Every entry keeps its source, confidence and author. |
 | **Never guesses** | Account names resolve only by full name, alias or a unique match; anything vague becomes *pending* with candidates listed. An AI confidence below 0.9 also waits. |
 | **Locked after reconciling** | A period you checked against the bank is locked; only you can change it, with a written reason. |
-| **Local-first** | Your data stays on your machine as human-readable text; the program never touches the network and has no runtime dependencies. |
+| **Local-first** | Your data stays on your machine as human-readable text; the program does not use the network by default and has no runtime dependencies. The one exception is `rates update`, which you run yourself to fetch exchange rates; it sends only currency codes and a date, never an amount or an account. |
 
 ## How it works
 
@@ -101,6 +101,25 @@ money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
 
+## Many currencies
+
+You are not tied to one currency:
+
+```bash
+money-mom open Assets:UsdAccount --currency USD               # a dollar-only account
+money-mom spend '5 USD' --from cash --category coffee                  # currency in the amount: 5 USD, HK$200, 5美元
+money-mom spend 5 --from UsdAccount --category coffee                   # or decided by the account: a USD-only account means USD
+money-mom exchange 100 USD 720 CNY --from UsdAccount --to checking    # exchange: the rate you actually got is kept
+
+money-mom rates update      # the only command that uses the network: ECB daily reference rates
+money-mom networth          # all currencies as one total in your base currency
+money-mom balance --account Assets --in CNY  # asset accounts converted, with a total
+```
+
+- **A currency is never guessed.** For an ambiguous symbol such as `$` or `¥`, the accounts involved decide first, then the currencies already in your ledger; a pick that is not your base currency waits for confirmation, and anything still unclear is a question with candidates. Single-quote a `$` (the shell treats `$5` as a variable) or use `--ccy USD`.
+- **Rates are daily reference prices, not a live feed.** The source is the European Central Bank (via Frankfurter): one rate per business day, about 30 currencies, **no TWD**. For anything it does not cover, record one yourself with `money-mom rates set`, which requires a source.
+- **Conversions can be checked.** Every rate is stored with its source; conversion uses only stored rates, never one dated after the day asked about. A currency with no rate is listed, not silently dropped, and rates older than 7 days are flagged.
+
 Every command accepts `--json`; exit codes are 0 success, 1 the ledger refused, 2 usage error. Run `money-mom --help`, or see the [command reference](skills/money-mom/references/commands.md).
 
 ## Compatible AI agents
@@ -113,9 +132,9 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · intents (spend / income / transfer) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Done | Ledger core · command line · SQLite queries · intents (spend / income / transfer) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
 | Next | Monthly report · bank reconciliation and statement import (Alipay, WeChat, bank PDFs) · subscription and anomaly alerts · "Mom" tone levels |
-| Later | PyPI / npm · Claude Code plugin marketplace · Beancount export · investor pack (multi-currency, HK/US holdings, net worth) |
+| Later | PyPI / npm · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.
 

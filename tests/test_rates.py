@@ -380,7 +380,7 @@ class Cli(CliTestCase):
         missing = self.js("balance", "--account", "Assets", "--in", "CNY")["data"]
         self.assertTrue(missing["partial"])
         self.assertEqual(missing["missing"], ["USD"])
-        out, _ = self.run_cli("--ledger", str(self.root), "balance", "--in", "人民币")
+        out, _ = self.run_cli("--ledger", str(self.root), "balance", "--account", "Assets", "--in", "人民币")
         self.assertIn("PARTIAL", out)
         self.assertIn("rates update", out)
         self.js("rates", "set", "USD", "CNY", "6.7046", "--source", "test", "--date", "2026-10-06")
@@ -395,6 +395,16 @@ class Cli(CliTestCase):
         expected = round_money(D(20000) * (D(1) / D("6.7046")) + D(1000), "USD")  # CNY converted by the inverse rate
         self.assertEqual(in_usd["total"], format(expected, "f"))
         self.assertEqual(self.js("balance", "--in", "$", expect=2)["error"]["code"], "usage_error")
+
+    def test_a_whole_ledger_total_is_omitted_because_it_is_always_zero(self):
+        self.js("rates", "set", "USD", "CNY", "6.7046", "--source", "t", "--date", "2026-10-06")
+        data = self.js("balance", "--in", "CNY")["data"]
+        self.assertIsNone(data["total"])
+        self.assertIn("net to zero", data["note"])
+        out, _ = self.run_cli("--ledger", str(self.root), "balance", "--in", "CNY")
+        self.assertIn("No total", out)
+        self.assertNotIn("Total in", out)
+        self.assertEqual(self.js("balance", "--account", "Assets", "--in", "CNY")["data"]["total"], "26704.60")
 
     def test_networth_as_of_uses_the_rate_of_that_day(self):
         self.js("rates", "set", "USD", "CNY", "6.50", "--source", "t", "--date", "2026-09-01")

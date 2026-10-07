@@ -22,9 +22,9 @@ Shared flags for `spend`, `income`, `transfer` and `add`:
 | `income AMOUNT --to ACCOUNT --category CATEGORY` | Money received from an income category. |
 | `transfer AMOUNT --from ACCOUNT --to ACCOUNT` | Move money between your own accounts. Opening balances: `--from 期初` (Equity). |
 
-Extra flags for those three: `--ccy` (default: base currency), `--strict` (fail instead of recording a pending entry when a name cannot be resolved), `--dry-run` (show the result, write nothing), `--override-lock REASON` (human only).
+Extra flags for those three: `--ccy` (a code or word such as `USD` or `美元`; default: what the amount says, else what the accounts allow, else the base currency), `--strict` (fail instead of recording a pending entry when a name cannot be resolved), `--dry-run` (show the result, write nothing), `--override-lock REASON` (human only).
 
-`AMOUNT` is positive; the direction comes from the command. A name can be a full account name, an alias, or a trailing run of name segments that matches exactly one open account (`咖啡` or `餐饮:咖啡`). A substring is only a suggestion and never accepted.
+`AMOUNT` is positive; the direction comes from the command. It may carry its currency: `5美元`, `'HK$200'`, `'USD 5'`, `1,200元`. Single-quote anything with a `$`. A name can be a full account name, an alias, or a trailing run of name segments that matches exactly one open account (`咖啡` or `餐饮:咖啡`). A substring is only a suggestion and never accepted.
 
 `spend`, `income` and `transfer` answer with `data.status` (`posted` or `pending`), `data.postings`, `data.unresolved` (slot, reason, candidates) and `data.reasons`.
 
@@ -32,6 +32,7 @@ Extra flags for those three: `--ccy` (default: base currency), `--strict` (fail 
 |---|---|
 | `add --posting "ACCOUNT AMOUNT CCY" --posting ...` | Record explicit postings. Use `?` as the account for an unknown one (pending only). `--status posted|pending`. |
 | `add --from-json FILE\|-` | A transaction object, or a list of them written atomically. Fields: `date`, `status`, `narration`, `payee`, `postings`, `import_hash`, `source`, `confidence`, `meta`. |
+| `exchange GIVE GET --from ACCOUNT --to ACCOUNT` | A currency exchange, e.g. `'100 USD' '720 CNY'`. Recorded through an Equity conversion account; the rate obtained is kept in the entry. Flags: `--give-ccy`, `--get-ccy`, plus the shared ones, `--strict`, `--dry-run`. |
 | `confirm ID` | Turn a pending entry into a posted one as it is. |
 | `confirm ID --category/--from/--to NAME` | Fill a slot of an entry made by `spend`/`income`/`transfer`. |
 | `confirm ID --posting ...` | Replace the postings. Not combinable with slot flags. |
@@ -53,8 +54,13 @@ Extra flags for those three: `--ccy` (default: base currency), `--strict` (fail 
 
 | Command | Purpose |
 |---|---|
-| `balance [--account PREFIX] [--as-of D] [--all]` | Exact balances. Zero balances hidden unless `--all`. |
+| `balance [--account PREFIX] [--as-of D] [--all] [--in CCY]` | Exact balances. Zero balances hidden unless `--all`. `--in` also converts each balance with stored rates, and with `--account` gives a total (without it the total is omitted, since all accounts together net to zero); currencies without a rate are listed as missing (`partial`), never dropped. |
 | `pending` | Entries waiting for confirmation. |
+| `currency TEXT [--ccy C] [--account NAME ...]` | Which currency a piece of text means, and how it was decided. |
+| `networth [--in CCY] [--as-of D]` | Assets minus liabilities per currency and as one total, from stored rates. |
+| `rates update [--currency C ...] [--date D] [--dry-run]` | **The only command that uses the network.** Fetch ECB daily reference rates into the base currency and store them with their source. Sends only currency codes and a date. |
+| `rates set BASE QUOTE RATE --source TEXT [--date D]` | Record a rate yourself: 1 BASE = RATE QUOTE. A source is required. |
+| `rates list [--base B] [--quote Q]` | The latest stored rate for each pair. |
 | `show ID` | One transaction or assertion with every event that touched it. |
 | `query "SELECT ..." [--limit N]` | One read-only statement against the SQLite cache. See `sql.md`. |
 | `check` | Replay the whole ledger and re-verify every assertion. |

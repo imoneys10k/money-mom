@@ -1,11 +1,11 @@
 ---
 name: money-mom
-description: Personal bookkeeping on a local, double-entry, append-only ledger. Record spending, income and transfers, answer questions about the user's money, reconcile accounts, and hold back anything uncertain for the user to confirm. Use whenever the user mentions recording or reviewing expenses, income, balances, accounts, receipts or bank statements, for example "午饭花了38", "记一笔账", "这个月花了多少", "工资到账了", "log my coffee", "how much did I spend on food last month". 记账、查账、对账、余额、账本、收支. Do not use for investment advice or for moving real money.
+description: Personal bookkeeping on a local, double-entry, append-only ledger. Record spending, income and transfers, answer questions about the user's money, reconcile accounts, and hold back anything uncertain for the user to confirm. Use whenever the user mentions recording or reviewing expenses, income, balances, accounts, receipts or bank statements, for example "午饭花了38", "记一笔账", "这个月花了多少", "工资到账了", "log my coffee", "how much did I spend on food last month". 记账、查账、对账、余额、账本、收支、换汇、汇率、净资产、多币种. Do not use for investment advice or for moving real money.
 license: MIT
 compatibility: Needs the money-mom command (Python 3.11+, installed with uv). All data stays on the user's computer. Installation steps are in INSTALL.md of https://github.com/imoneys10k/money-mom
 metadata:
   author: imoneys10k
-  version: "0.1.0a1"
+  version: "0.1.0a2"
 ---
 
 # Money Mom
@@ -21,9 +21,9 @@ The split matters. **You** understand what the user said and what happened. **Th
 3. **Never guess.** If an account, amount or date is unclear, ask. A pending entry is better than a wrong one, and a question is better than a pending entry.
 4. **Always identify yourself and be honest about confidence.** Pass `--actor agent:<your name>` (for example `agent:claude-code`, `agent:codex`) and `--confidence <0 to 1>` on every write. The program refuses agent entries without a confidence, and refuses to post below the threshold directly.
 5. **Never use `--override-lock`.** It is for the user to type themselves, after they understand that it rewrites a reconciled period.
-6. **Amounts are exact text.** `38.50`, never `38.5` computed from a float. Always keep the currency.
+6. **Amounts are exact text.** `38.50`, never `38.5` computed from a float. Always keep the currency, and never guess it (see Currencies).
 7. **Record only what already happened.** This skill moves no money and gives no investment advice. If asked for either, say so kindly.
-8. **Keep it private.** The ledger is the user's data. Do not paste it into other tools or messages. In `--source-ref` put a short quote or a file *name*, never a full path, account number or password.
+8. **Keep it private.** The ledger is the user's data. Do not paste it into other tools or messages. In `--source-ref` put a short quote or a file *name*, never a full path, account number or password. The program stays offline except `money-mom rates update` (see Totals across currencies).
 9. **Answer in the user's language**, in the tone from `doctor` (see Voice).
 
 ## 0. Check the setup first
@@ -92,6 +92,28 @@ money-mom confirm <ID> --category 餐饮:聚餐 --actor agent:claude-code --json
 
 `confirm` takes `--from`, `--to` or `--category` for entries made by `spend` / `income` / `transfer`. If the entry was pending only for low confidence and the user agrees, `money-mom confirm <ID>` accepts it as it is. `money-mom pending --json` lists everything waiting.
 
+## 1b. Currencies
+
+The user may use any currency. The program recognises it; you never have to guess.
+
+- **When you are sure,** pass a plain number and the code: `money-mom spend 5 --ccy USD ...`. A code (`USD`) or a word (`美元`) both work.
+- **Or pass what the user wrote, in single quotes:** `'5美元'`, `'HK$200'`, `'USD 5'`, `'1,200元'`. **Never leave a `$` unquoted**: the shell turns `$5` into an empty variable and the amount is lost.
+- **Resolution order:** an explicit currency (flag or in the amount) → for an ambiguous symbol (`$`, `¥`), what the accounts involved allow → then the currencies already in the ledger → otherwise the base currency (for a plain number). A bare `元` or `块` names no currency.
+- **Preview it** when unsure: `money-mom currency '$5' --account 美元户 --json` shows the decision and how it was made (`data.matched_by`: `flag`, `text`, `account`, `ledger`, `default`).
+- **When it cannot tell,** the command is refused with `ambiguous_currency` and lists `details.candidates`. Ask the user which, then retry with `--ccy`. Do not pick one yourself.
+- **`data.currency.inferred` is true** when the pick came from the ledger and is not the base currency. The entry is then held as *pending*; tell the user which currency you assumed and let them confirm.
+
+### Exchanging one currency for another
+
+When the user converted money, record the exchange, not two separate entries:
+
+```bash
+money-mom exchange 100 USD 720 CNY --from 美元户 --to 银行卡 \
+  --actor agent:claude-code --confidence 0.95 --json
+```
+
+It records what was actually given and got (the real rate is kept in the entry), through the `Equity:汇兑` account. If the ledger has none, it says how to create one. Use `--give-ccy` and `--get-ccy` with plain numbers to avoid quoting a `$`.
+
 ## 2. Corrections
 
 Nothing is ever edited or deleted. To fix a wrong entry: `money-mom void <ID> --reason "<why>"`, then record the right one. Ask the user first, unless you are undoing a mistake you made a moment ago in this same conversation. `money-mom show <ID>` prints an entry with every event that touched it.
@@ -111,6 +133,20 @@ money-mom query "SELECT ..." --json             # read-only SQL
 - Say how you got the number when it is not obvious, and offer the query.
 
 Schema and ready-made queries are in [references/sql.md](references/sql.md).
+
+### Totals across currencies
+
+```bash
+money-mom networth --json                 # assets minus liabilities, per currency and as one total (base currency)
+money-mom networth --in USD --as-of 2026-09-30 --json
+money-mom balance --account Assets --in CNY --json   # a total needs --account; use networth for assets minus liabilities
+```
+
+- Conversion uses only **stored** rates, never one dated after the day asked about, and never your memory of a rate. Report the rate date with the total.
+- `data.partial` is true when a currency has no rate: that currency is listed in `data.missing` and **left out of the total**. Say so; never present a partial total as complete. `data.stale` lists currencies whose rate is more than 7 days old; mention it.
+- **To get rates, `money-mom rates update` fetches the European Central Bank's daily reference rates. It is the only command that uses the network.** It sends only currency codes and a date, never amounts or accounts. Tell the user before running it, run it only when they want converted figures (or agree), and at most once per conversation. If they decline, ask them for the rate and its source and record it: `money-mom rates set USD CNY 6.7046 --source "bank app, 2026-10-07"`.
+- The rates are one per business day (about 30 currencies, **no TWD**), so they are not live market prices; do not describe them as real-time. `rates update` reports currencies it does not cover as `unsupported`; use `rates set` for those. `money-mom rates list` shows what is stored.
+- A failed update (`rates_unavailable`) writes nothing. Tell the user and offer `rates set`.
 
 ## 4. Reconciling with a bank statement
 
@@ -147,7 +183,7 @@ EOF
 
 ## 6. Not covered yet
 
-There are no `refund`, lending, foreign-exchange or investment commands yet. For a refund, show the user the reversed postings and, if they agree, record them with `add --posting` (money back into the account, expense reduced). For anything else, say it is not supported yet instead of improvising.
+There are no `refund`, lending or investment (holdings, cost basis, gains) commands yet. For a refund, show the user the reversed postings and, if they agree, record them with `add --posting` (money back into the account, expense reduced). For anything else, say it is not supported yet instead of improvising.
 
 ## 7. When a command is refused
 
@@ -163,6 +199,12 @@ Exit code 1 means the ledger said no; 2 means the command line was wrong. With `
 | `assertion_failed` | See Reconciling. |
 | `unknown_account` | Check `money-mom accounts`; offer to `open` one if the user wants it. |
 | `account_not_empty` | An account can only close at zero. Move the balance first. |
+| `ambiguous_currency` | Ask the user which currency; use `details.candidates`; retry with `--ccy`. |
+| `currency_conflict` | The amount, `--ccy` and the accounts disagree. Show the user and ask. For two currencies in one move, use `exchange`. |
+| `unknown_currency` | The text is not a currency we know. Ask, or use a 3-letter code with `--ccy`. |
+| `no_rate` | No stored rate for that pair. Offer `rates update` (network) or `rates set`. |
+| `rates_unavailable` | The rate source could not be reached or answered badly. Nothing was written. Offer `rates set`. |
+| `no_conversion_account` | `exchange` needs an Equity account: `money-mom open Equity:汇兑`. |
 | `not_a_ledger` | No ledger here. See "Check the setup". |
 
 Anything else: show the user the message as it is. Do not retry with different flags to get around a refusal.

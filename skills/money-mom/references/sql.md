@@ -11,13 +11,14 @@ Amounts: `amount_text` is exact. `amount` is a float so that `SUM` works; round 
 | `v_postings` | One row per posting of every **posted** transaction: `txn_id, idx, account, amount_text, amount, ccy, date, narration, payee, source_type, source_ref, confidence, actor_type, actor_name` |
 | `v_balances` | `account, ccy, amount`: current balance. |
 | `v_monthly` | `month ('YYYY-MM'), account, ccy, amount`: activity per month. |
+| `v_rates` | The latest stored exchange rate per pair: `base, quote, date, rate_text, rate, source_ref` (1 `base` = `rate` `quote`). |
 | `v_pending` | Entries waiting for confirmation: `id, date, payee, narration, confidence, source_type, source_ref, actor_type, actor_name, postings`. |
 
 Signs follow double entry: **expenses are positive; income, liabilities you owe, and equity are negative**; asset balances are positive. Pending and voided entries are in none of the views.
 
 ## Tables
 
-`txns(id, date, status, narration, payee, import_hash, source_type, source_ref, confidence, actor_type, actor_name, ts, confirmed_by, voided_by)` with `status` of `posted`, `pending` or `voided`; `postings(txn_id, idx, account, amount_text, amount, ccy)` where `account` is NULL for an unresolved side; `accounts(name, root, opened, closed, currencies)`; `assertions(id, date, account, amount_text, amount, ccy, voided_by)`; `events(seq, id, kind, ts, actor_type, actor_name, target)`.
+`txns(id, date, status, narration, payee, import_hash, source_type, source_ref, confidence, actor_type, actor_name, ts, confirmed_by, voided_by)` with `status` of `posted`, `pending` or `voided`; `postings(txn_id, idx, account, amount_text, amount, ccy)` where `account` is NULL for an unresolved side; `accounts(name, root, opened, closed, currencies)`; `assertions(id, date, account, amount_text, amount, ccy, voided_by)`; `events(seq, id, kind, ts, actor_type, actor_name, target)`; `prices(id, date, base, quote, rate_text, rate, source_type, source_ref, recorded_at)` holds every live rate (a later rate for the same day replaces an earlier one; voided ones are absent).
 
 ## Examples
 

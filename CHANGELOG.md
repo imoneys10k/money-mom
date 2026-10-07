@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.1.0a2] - 2026-10-07
+
+多币种：币种识别、汇率折算、换汇。**程序现在有一个会联网的命令** `rates update`，其余仍然离线。
+
 ### Added
 - 换汇 `money-mom exchange 100 USD 720 CNY --from 美元户 --to 银行卡`：经 `Equity:汇兑`（模板已含；旧账本用 `open Equity:汇兑` 添加）记成四条分录，每个币种各自仍然平衡；实际成交汇率记在 meta 里，不取数也不假设；`--give-ccy` / `--get-ccy` 可避开 shell 对 `$` 的转义；同样支持待确认、`--strict`、`--dry-run` 和按槽位补全。
 - 汇率与折算：新增 `price` 事件（带来源，只追加，同日后记的替换先记的，可作废）；`money-mom rates update` 是**唯一会联网的命令**，从 Frankfurter（欧洲央行每日参考汇率，约 30 种货币，不含台币，不是实时行情）取每种外币兑本位币的汇率，请求里只有币种代码和日期；取数失败时一个都不写，不支持的币种单独报告；`rates set` 手动记录（必须写来源）、`rates list`；`balance --in CNY` 和 `networth` 用已存的汇率折算：只用不晚于所查日期的汇率、先加总再四舍五入、缺汇率的币种明确列出而不是悄悄丢掉、超过 7 天的汇率标为过期。SQLite 缓存新增 `prices` 表和 `v_rates` 视图。

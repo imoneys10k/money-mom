@@ -24,7 +24,7 @@ Money Mom 是一个装进 AI agent（Claude Code、Codex、Cursor、Gemini CLI�
 
 它做的不是“又一个记账软件”，而是让 AI 记账这件事**值得信任**：AI 只负责听懂你的话，**账由程序来记、来校验**。
 
-> **状态：pre-alpha（`0.1.0a1`）。** 账本内核、命令行和 skill 已经可以用，也都经过测试；但还没有发布到 PyPI 或 npm，对账、账单导入、投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
+> **状态：pre-alpha（`0.1.0a2`）。** 账本内核、命令行和 skill 已经可以用，也都经过测试；但还没有发布到 PyPI 或 npm，对账、账单导入、投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
 
 ## 一句话安装
 
@@ -63,7 +63,7 @@ agent 会读 [INSTALL.md](INSTALL.md)：装好 `money-mom` 命令（锁定版本
 | **只追加，不改历史** | 记错了不擦掉，而是作废并重记；每一笔的来源、置信度、谁写的都留着。 |
 | **从不靠猜** | 账户名只认全名、别名或唯一匹配；含糊的整笔记为“待确认”，并列出候选。AI 的置信度低于 0.9 也先待确认。 |
 | **对账后锁定** | 核对过银行余额的时期会被锁定，回头改只能由你本人写明原因。 |
-| **本地优先** | 数据只在你的电脑上，是人能读的纯文本；程序本身不联网、没有运行时依赖。 |
+| **本地优先** | 数据只在你的电脑上，是人能读的纯文本；程序默认不联网、没有运行时依赖。唯一会联网的是你主动运行的 `rates update`（取汇率），而且只发送币种代码和日期，不发送金额或账户。 |
 
 ## 工作原理
 
@@ -101,6 +101,25 @@ money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # 自检
 ```
 
+## 多币种
+
+不必固定一个币种：
+
+```bash
+money-mom open Assets:美元户 --currency USD                 # 开一个只收美元的账户
+money-mom spend '5美元' --from 现金 --category 咖啡          # 金额里写币种：5美元、HK$200、USD 5
+money-mom spend 5 --from 美元户 --category 咖啡              # 或由账户决定：只收美元的账户就是美元
+money-mom exchange 100 USD 720 CNY --from 美元户 --to 银行卡  # 换汇：实际成交汇率记在账里
+
+money-mom rates update      # 唯一会联网的命令：取欧洲央行每日参考汇率
+money-mom networth          # 所有币种折成本位币的净资产
+money-mom balance --account Assets --in CNY  # 资产账户逐个折算并合计
+```
+
+- **币种从不靠猜。** `$`、`¥` 这类有歧义的符号，先看账户允许的币种，再看账本里在用的币种；非本位币的推断会先记为待确认，仍不确定就问你并列出候选。写 `$` 时记得用单引号（shell 会把 `$5` 当变量），或者改用 `--ccy USD`。
+- **汇率是每日参考价，不是实时行情。** 来源是欧洲央行（经 Frankfurter），每个工作日一次，约 30 种货币，**不含台币**；不支持的币种可以用 `money-mom rates set` 手动记，必须写来源。
+- **折算可复核。** 每个汇率连同来源一起存进账本，折算只用已存的汇率、只用不晚于所查日期的汇率；缺汇率的币种会明确列出而不是悄悄丢掉，超过 7 天的汇率标为过期。
+
 每个命令都支持 `--json`，退出码 0 成功、1 账本拒绝、2 用法错误。完整命令见 `money-mom --help` 或 [命令参考](skills/money-mom/references/commands.md)。
 
 ## 兼容的 AI agent
@@ -113,9 +132,9 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 | | |
 |---|---|
-| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 意图层（spend / income / transfer）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
+| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 意图层（spend / income / transfer）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
 | 下一步 | 月报 · 银行对账与账单导入（支付宝、微信、银行 PDF）· 订阅与异常提醒 · “妈妈”语气档位 |
-| 之后 | 发布到 PyPI / npm · Claude Code 插件市场 · Beancount 导出 · 投资者包（多币种、港美股持仓、净资产） |
+| 之后 | 发布到 PyPI / npm · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
 
 不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。
 
