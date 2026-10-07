@@ -18,10 +18,11 @@
   money-mom.toml      配置：本位币、时区、语气档位、schema 版本
   ledger/
     2026-10.jsonl     事件流，按事件的记录时间 ts 分月，只追加
+  aliases.toml        账户别名（由 `money-mom alias` 维护，不属于财务事实，可手改）
   cache.sqlite        由事件流推导，可随时删除重建，不入 git
 ```
 
-`money-mom.toml` 用 TOML（Python 3.11 起标准库可读），v0 只含 `schema`、`base_currency`、`tone`（`gentle` / `normal` / `strict` / `zen`）三项，时间一律用系统本地时区。账本目录建议自己 `git init`，每批写入一次 commit。
+`money-mom.toml` 用 TOML（Python 3.11 起标准库可读），v0 含 `schema`、`base_currency`、`tone`（`gentle` / `normal` / `strict` / `zen`），以及可选的 `auto_post_confidence`（0 到 1，默认 0.9）。时间一律用系统本地时区。账本目录建议自己 `git init`，每批写入一次 commit。
 
 ## 事件通用字段
 
@@ -87,6 +88,18 @@
 {"v":1,"id":"01J9XK0002","kind":"txn","ts":"2026-10-07T12:31:05+08:00","actor":{"type":"agent","name":"claude-code"},"source":{"type":"chat","ref":"午饭瑞幸 38，支付宝付的"},"confidence":0.96,"date":"2026-10-07","status":"posted","narration":"午饭","payee":"瑞幸","postings":[{"account":"Expenses:Dining:Coffee","amount":"38.00","ccy":"CNY"},{"account":"Assets:Alipay","amount":"-38.00","ccy":"CNY"}]}
 {"v":1,"id":"01J9XK0003","kind":"txn","ts":"2026-10-07T12:40:10+08:00","actor":{"type":"agent","name":"claude-code"},"source":{"type":"chat","ref":"给小王转了 200"},"confidence":0.55,"date":"2026-10-07","status":"pending","payee":"小王","postings":[{"account":null,"amount":"200.00","ccy":"CNY"},{"account":"Assets:Alipay","amount":"-200.00","ccy":"CNY"}]}
 ```
+
+### 意图记录的 `meta` 约定
+
+由 `spend` / `income` / `transfer` 写入的交易带有这些 `meta` 键（自由键值，内核不校验）：
+
+| 键 | 含义 |
+|---|---|
+| `intent` | `spend` / `income` / `transfer` |
+| `given` | 调用者说的原话，如 `{"from": "支付宝", "category": "咖啡"}` |
+| `unresolved` | 没解析成功的槽位：`slot`、`term`、`reason`（`missing` / `unknown` / `ambiguous` / `approximate` / `wrong_type` / `unavailable`）、`candidates` |
+
+渲染规则：`spend` 是类别记借、来源记贷；`income` 是收款账户记借、收入类别记贷；`transfer` 是转入记借、转出记贷。`confirm` 按槽位补全时依据 `intent` 知道哪条分录对应哪个槽位。
 
 ## 确认、作废与更正
 

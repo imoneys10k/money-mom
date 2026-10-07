@@ -20,7 +20,10 @@ from typing import Any, Callable
 from . import __version__
 from .cache import open_cache, run_query
 from .errors import LedgerError
+from .events import ROOTS
+from .intents import SPECS, postings_with_slots, record_intent, resolve_account
 from .ledger import TONES, Ledger
+from .templates import TEMPLATES, apply_template
 
 DEFAULT_HOME = "~/MoneyMom"
 JSON_TXN_FIELDS = {"date", "status", "narration", "payee", "postings", "import_hash", "source", "confidence", "meta"}
@@ -129,9 +132,20 @@ def _table(headers: list[str], rows: list[list[Any]]) -> str:
 
 def cmd_init(args: argparse.Namespace) -> tuple[Any, str]:
     root = _ledger_path(args)
-    Ledger.init(root, base_currency=args.base_currency, tone=args.tone)
-    data = {"path": str(root), "base_currency": args.base_currency, "tone": args.tone}
-    return data, f"Created a Money Mom ledger at {root}"
+    ledger = Ledger.init(root, base_currency=args.base_currency, tone=args.tone)
+    opened = 0
+    if args.template != "none":
+        opened = apply_template(ledger, args.template, args.date or _today(), _actor(args))
+    data = {
+        "path": str(root), "base_currency": args.base_currency, "tone": args.tone,
+        "template": args.template, "accounts_opened": opened,
+    }
+    text = f"Created a Money Mom ledger at {root}"
+    if opened:
+        text += f"\nOpened {opened} accounts from the {args.template!r} template"
+    else:
+        text += "\nNo accounts yet. Start from a template with --template (" + ", ".join(sorted(TEMPLATES)) + "), or use `money-mom open`."
+    return data, text
 
 
 def cmd_open(args: argparse.Namespace) -> tuple[Any, str]:
@@ -202,7 +216,14 @@ def cmd_add(args: argparse.Namespace) -> tuple[Any, str]:
 
 def cmd_confirm(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
-    postings = [_parse_posting(p) for p in args.posting] if args.posting else None
+    slots = {s: getattr(args, f"slot_{s}", None) for s in ("from", "to", "category")}
+    named = {s: t for s, t in slots.items() if t}
+    if named and args.posting:
+        raise UsageError("use either --posting or slot names (--from/--to/--category), not both")
+    if named:
+        postings = postings_with_slots(ledger, args.target, named)
+    else:
+        postings = [_parse_posting(p) for p in args.posting] if args.posting else None
     ev = ledger.append(
         ledger.new_event(
             "confirm", actor=_actor(args), meta=_override_meta(args), target=args.target, postings=postings
@@ -227,6 +248,78 @@ def cmd_assert(args: argparse.Namespace) -> tuple[Any, str]:
         {"id": ev.id, "account": args.account, "amount": args.amount, "ccy": args.ccy},
         f"Balance of {args.account} is {args.amount} {args.ccy} as asserted",
     )
+
+
+def _intent_text(result) -> str:
+    verb = {"posted": "Recorded", "pending": "Pending"}[result.status]
+    if result.written:
+        head = f"{verb} {result.kind} of {result.amount} {result.ccy} ({result.event.id})"
+    else:
+        head = f"Dry run, nothing written: would record a {result.status} {result.kind} of {result.amount} {result.ccy}"
+    lines = [head]
+    lines += [
+        f"    {_ljust(p['account'] or '?', 28)} {_rjust(p['amount'], 12)} {p['ccy']}" for p in result.postings
+    ]
+    if result.reasons:
+        lines.append("  Needs your confirmation:" if result.written else "  Would need confirmation:")
+        lines += [f"    - {r}" for r in result.reasons]
+        for u in result.unresolved:
+            if u["candidates"]:
+                lines.append(f"    candidates for {u['slot']}: {', '.join(u['candidates'])}")
+        if result.written:
+            slots = [u["slot"] for u in result.unresolved]
+            fix = " ".join(f"--{slot} NAME" for slot in slots) if slots else ""
+            lines.append(
+                f"  Fill it in: money-mom confirm {result.event.id} {fix}".rstrip()
+                if slots else f"  Accept it as is: money-mom confirm {result.event.id}"
+            )
+            lines.append(f"  Or drop it: money-mom void {result.event.id} --reason ...")
+    return "\n".join(lines)
+
+
+def _intent_handler(kind: str) -> Callable[[argparse.Namespace], tuple[Any, str]]:
+    def handler(args: argparse.Namespace) -> tuple[Any, str]:
+        ledger = Ledger.open(_ledger_path(args))
+        result = record_intent(
+            ledger, kind, amount=args.amount,
+            slots={slot: getattr(args, f"slot_{slot}", None) for slot in SPECS[kind]},
+            date=args.date or _today(), ccy=args.ccy, payee=args.payee, narration=args.narration,
+            confidence=args.confidence, source=_source(args), import_hash=args.import_hash,
+            actor=_actor(args), strict=args.strict, dry_run=args.dry_run, meta=_override_meta(args),
+        )
+        return result.to_dict(), _intent_text(result)
+
+    return handler
+
+
+def cmd_alias(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    if args.alias_command == "add":
+        ledger.set_alias(args.alias, args.account)
+        return {"alias": args.alias, "account": args.account}, f"{args.alias} now means {args.account}"
+    if args.alias_command == "remove":
+        ledger.remove_alias(args.alias)
+        return {"alias": args.alias}, f"Removed alias {args.alias}"
+    mapping = ledger.aliases()
+    rows = [[a, t] for a, t in sorted(mapping.items())]
+    return mapping, _table(["alias", "account"], rows) if rows else "No aliases yet."
+
+
+_TYPE_ROOTS = {"asset": "Assets", "liability": "Liabilities", "equity": "Equity", "income": "Income", "expense": "Expenses"}
+
+
+def cmd_resolve(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    roots = tuple(_TYPE_ROOTS[t] for t in args.type) if args.type else ROOTS
+    when = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
+    res = resolve_account(ledger.state, ledger.aliases(), args.term, roots, when)
+    if res.ok:
+        text = f"{args.term} -> {res.account} (by {res.matched_by})"
+    else:
+        text = f"Cannot resolve {args.term!r}: {res.message}"
+        if res.candidates:
+            text += "\n  candidates: " + ", ".join(res.candidates)
+    return res.to_dict(), text
 
 
 def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
@@ -273,13 +366,14 @@ def cmd_pending(args: argparse.Namespace) -> tuple[Any, str]:
                 "id": rec.id, "date": rec.date.isoformat(), "payee": ev.payee, "narration": ev.narration,
                 "postings": _postings_json(rec.postings), "confidence": ev.confidence,
                 "source": ev.source, "actor": f"{ev.actor_type}:{ev.actor_name}",
+                "intent": ev.meta.get("intent"),
             }
         )
     if not items:
         return [], "Nothing is waiting for confirmation."
     lines = []
     for it in items:
-        label = it["payee"] or it["narration"] or ""
+        label = it["payee"] or it["narration"] or it["intent"] or ""
         conf = "" if it["confidence"] is None else f"  confidence {it['confidence']}"
         lines.append(f"{it['id']}  {it['date']}  {label}{conf}")
         lines += [
@@ -353,12 +447,24 @@ def _build_parser() -> argparse.ArgumentParser:
         p.set_defaults(func=func)
         return p
 
+    def txn_flags(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+        p.add_argument("--narration")
+        p.add_argument("--payee")
+        p.add_argument("--import-hash")
+        p.add_argument("--confidence", type=float, help="0 to 1")
+        p.add_argument("--source-type", choices=("chat", "file", "screenshot", "import", "manual"))
+        p.add_argument("--source-ref")
+        p.add_argument("--source-sha256")
+
     def lock_flag(p: argparse.ArgumentParser) -> None:
         p.add_argument("--override-lock", metavar="REASON", help="human only: write into a period locked by a balance assertion")
 
     p = command("init", cmd_init, "create a new ledger")
     p.add_argument("--base-currency", default="CNY")
     p.add_argument("--tone", default="normal", choices=TONES)
+    p.add_argument("--template", default="none", choices=["none", *sorted(TEMPLATES)], help="start from a ready-made account tree")
+    p.add_argument("--date", help="date the template accounts open (default: today); use an earlier date if you will back-date entries")
 
     p = command("open", cmd_open, "open an account")
     p.add_argument("account")
@@ -372,21 +478,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = command("add", cmd_add, "record a transaction (or several, atomically, with --from-json)")
     p.add_argument("--posting", action="append", metavar='"ACCOUNT AMOUNT CCY"', help='one posting; use "?" as the account when unknown (pending only); repeatable')
-    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    txn_flags(p)
     p.add_argument("--status", choices=("posted", "pending"), help="default: posted")
-    p.add_argument("--narration")
-    p.add_argument("--payee")
-    p.add_argument("--import-hash")
-    p.add_argument("--confidence", type=float, help="0 to 1")
-    p.add_argument("--source-type", choices=("chat", "file", "screenshot", "import", "manual"))
-    p.add_argument("--source-ref")
-    p.add_argument("--source-sha256")
     p.add_argument("--from-json", metavar="FILE|-", help="read a transaction object or a list of them from a file or stdin")
     lock_flag(p)
 
     p = command("confirm", cmd_confirm, "turn a pending transaction into a posted one")
     p.add_argument("target", help="id of the pending transaction")
     p.add_argument("--posting", action="append", metavar='"ACCOUNT AMOUNT CCY"', help="replacement postings (repeatable)")
+    for slot, text in (("from", "fill the source account"), ("to", "fill the destination account"), ("category", "fill the category")):
+        p.add_argument(f"--{slot}", dest=f"slot_{slot}", metavar="ACCOUNT", help=f"{text} of an entry made by spend/income/transfer")
     lock_flag(p)
 
     p = command("void", cmd_void, "void a transaction or an assertion (nothing is deleted)")
@@ -398,6 +499,40 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("account")
     p.add_argument("amount")
     p.add_argument("ccy")
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+
+    slot_help = {
+        "from": "account the money leaves (name, alias or leaf name)",
+        "to": "account the money arrives in",
+        "category": "expense or income category",
+    }
+    for kind, summary in (
+        ("spend", "record money spent: an expense paid from an asset or liability account"),
+        ("income", "record money received into an account from an income category"),
+        ("transfer", "move money between your own accounts (also sets opening balances from Equity)"),
+    ):
+        p = command(kind, _intent_handler(kind), summary + ". Unknown or ambiguous names are never guessed: the entry is recorded as pending")
+        p.add_argument("amount", help="a positive amount such as 38 or 38.50; the direction comes from the command")
+        for slot in SPECS[kind]:
+            p.add_argument(f"--{slot}", dest=f"slot_{slot}", metavar="ACCOUNT", help=slot_help[slot])
+        p.add_argument("--ccy", help="currency (default: the ledger's base currency)")
+        txn_flags(p)
+        p.add_argument("--strict", action="store_true", help="fail instead of recording a pending entry when an account cannot be resolved")
+        p.add_argument("--dry-run", action="store_true", help="show what would be recorded, write nothing")
+        lock_flag(p)
+
+    p = command("alias", cmd_alias, "manage friendly names for accounts")
+    alias_sub = p.add_subparsers(dest="alias_command", required=True, metavar="ACTION")
+    q = alias_sub.add_parser("add", parents=[common], help="make ALIAS mean ACCOUNT")
+    q.add_argument("alias")
+    q.add_argument("account")
+    q = alias_sub.add_parser("remove", parents=[common], help="remove an alias")
+    q.add_argument("alias")
+    alias_sub.add_parser("list", parents=[common], help="list aliases")
+
+    p = command("resolve", cmd_resolve, "show which account a name resolves to, or why it does not")
+    p.add_argument("term")
+    p.add_argument("--type", action="append", choices=sorted(_TYPE_ROOTS), help="only this kind of account (repeatable)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
 
     command("check", cmd_check, "replay the whole ledger and re-verify every assertion")
@@ -449,7 +584,7 @@ def main(argv: list[str] | None = None) -> int:
             print(_dump({"ok": False, "error": err.to_dict()}))
         else:
             print(f"error: {err}", file=sys.stderr)
-        return 2 if isinstance(err, UsageError) else 1
+        return 2 if err.code == "usage_error" else 1
     print(_dump({"ok": True, "data": data}) if args.json else text)
     if args.command == "check" and not data["ok"]:
         return 1

@@ -25,6 +25,10 @@ Money Mom 是**账本的 agent 接口层**，不是又一个记账 App。价值�
 17. **引擎与 skill 分离，并锁定引擎版本。** skill 只是使用说明，通过 `uvx money-mom==x.y.z` 调用 PyPI 上的引擎。
 18. **`AGENTS.md` 作为不支持 skill 的 agent 的兜底。**
 
+19. **意图层：agent 说业务含义，程序定借贷方向。** `spend` / `income` / `transfer` 渲染成分录；agent 不拼分录。
+20. **名字从不靠猜。** 账户名只接受全名、别名、唯一的末段匹配；子串只作候选。解析不了的一侧留空，整笔记为待确认，并把候选写进 `meta.unresolved`。
+21. **置信度门槛。** agent 的置信度低于 `auto_post_confidence`（默认 0.9，可在 `money-mom.toml` 配置）时先记为待确认；人手动输入没有置信度，直接入账。
+
 ## 待决策
 
 - 事件流文件的具体格式与字段（M0 的 `docs/data-model.md`）。

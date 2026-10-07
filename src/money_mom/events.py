@@ -156,7 +156,7 @@ def parse_amount(value: Any, field: str = "amount") -> Decimal:
     return Decimal(value)
 
 
-def _parse_date(value: Any, field: str = "date") -> _dt.date:
+def parse_date(value: Any, field: str = "date") -> _dt.date:
     if not isinstance(value, str) or not _DATE_RE.fullmatch(value):
         raise _bad(f"{field} must be YYYY-MM-DD, got {value!r}", "invalid_date")
     try:
@@ -325,19 +325,19 @@ def _parse(obj: Any) -> Event:
         return Open(
             **common,
             account=check_account_name(obj["account"]),
-            date=_parse_date(obj["date"]),
+            date=parse_date(obj["date"]),
             currencies=currencies,
         )
     if kind == "close":
         return Close(
-            **common, account=check_account_name(obj["account"]), date=_parse_date(obj["date"])
+            **common, account=check_account_name(obj["account"]), date=parse_date(obj["date"])
         )
     if kind == "txn":
         if obj["status"] not in TXN_STATUSES:
             raise _bad(f"status must be one of {', '.join(TXN_STATUSES)}", "invalid_status")
         return Txn(
             **common,
-            date=_parse_date(obj["date"]),
+            date=parse_date(obj["date"]),
             status=obj["status"],
             postings=_parse_postings(obj["postings"]),
             narration=_opt_str(obj, "narration"),
@@ -358,7 +358,7 @@ def _parse(obj: Any) -> Event:
         return Void(**common, target=_parse_id(obj["target"], "target"), reason=reason)
     return Assert(
         **common,
-        date=_parse_date(obj["date"]),
+        date=parse_date(obj["date"]),
         account=check_account_name(obj["account"]),
         amount=parse_amount(obj["amount"]),
         ccy=check_currency(obj["ccy"]),

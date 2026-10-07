@@ -28,6 +28,8 @@ from .state import LedgerState, Problem
 CONFIG_NAME = "money-mom.toml"
 LEDGER_DIR = "ledger"
 TONES = ("gentle", "normal", "strict", "zen")
+ALIASES_NAME = "aliases.toml"
+DEFAULT_AUTO_POST_CONFIDENCE = 0.9
 _FILE_RE = re.compile(r"(\d{4})-(\d{2})\.jsonl")
 
 AmountLike = str | int | Decimal
@@ -133,7 +135,9 @@ class Ledger:
         (root / CONFIG_NAME).write_text(
             f"schema = {SCHEMA_VERSION}\n"
             f"base_currency = {_toml_str(base_currency)}\n"
-            f"tone = {_toml_str(tone)}\n",
+            f"tone = {_toml_str(tone)}\n"
+            "# Entries an agent records with a confidence below this wait for your confirmation.\n"
+            f"# auto_post_confidence = {DEFAULT_AUTO_POST_CONFIDENCE}\n",
             encoding="utf-8",
         )
         gitignore = root / ".gitignore"
@@ -167,6 +171,9 @@ class Ledger:
         check_currency(config.get("base_currency"), "base_currency")
         if config.get("tone", "normal") not in TONES:
             raise LedgerError(f"tone must be one of {', '.join(TONES)}", code="invalid_config")
+        threshold = config.get("auto_post_confidence", DEFAULT_AUTO_POST_CONFIDENCE)
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+            raise LedgerError("auto_post_confidence must be a number between 0 and 1", code="invalid_config")
         return config
 
     @staticmethod
@@ -216,6 +223,60 @@ class Ledger:
                     err.where = err.where or where
                     raise
         return state
+
+    @property
+    def auto_post_confidence(self) -> float:
+        return float(self.config.get("auto_post_confidence", DEFAULT_AUTO_POST_CONFIDENCE))
+
+    @property
+    def base_currency(self) -> str:
+        return self.config["base_currency"]
+
+    def aliases(self) -> dict[str, str]:
+        """Friendly names for accounts, read fresh from aliases.toml."""
+        path = self.root / ALIASES_NAME
+        if not path.is_file():
+            return {}
+        try:
+            table = tomllib.loads(path.read_text(encoding="utf-8")).get("aliases", {})
+        except tomllib.TOMLDecodeError as err:
+            raise LedgerError(f"cannot parse {path}: {err}", code="invalid_config") from None
+        if not isinstance(table, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in table.items()):
+            raise LedgerError(f"{path}: [aliases] must map text to account names", code="invalid_config")
+        return dict(table)
+
+    def _write_aliases(self, mapping: dict[str, str]) -> None:
+        lines = ["# Managed by `money-mom alias`.", "[aliases]"]
+        lines += [
+            f"{json.dumps(k, ensure_ascii=False)} = {json.dumps(v, ensure_ascii=False)}"
+            for k, v in sorted(mapping.items())
+        ]
+        tmp = self.root / f"{ALIASES_NAME}.tmp-{os.getpid()}"
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+        os.replace(tmp, self.root / ALIASES_NAME)
+
+    def set_alias(self, alias: str, account: str) -> None:
+        alias = alias.strip()
+        if not alias or len(alias) > 64 or any(ord(c) < 32 for c in alias):
+            raise LedgerError("an alias must be 1-64 printable characters", code="invalid_alias")
+        with _exclusive_lock(self.ledger_dir / ".lock"):
+            self.reload()
+            if account not in self.state.accounts:
+                raise LedgerError(
+                    f"cannot alias {alias!r} to {account!r}: no such account", code="unknown_account",
+                    details={"account": account},
+                )
+            mapping = {k: v for k, v in self.aliases().items() if k.casefold() != alias.casefold()}
+            mapping[alias] = account
+            self._write_aliases(mapping)
+
+    def remove_alias(self, alias: str) -> None:
+        with _exclusive_lock(self.ledger_dir / ".lock"):
+            mapping = self.aliases()
+            kept = {k: v for k, v in mapping.items() if k.casefold() != alias.strip().casefold()}
+            if len(kept) == len(mapping):
+                raise LedgerError(f"no alias {alias!r}", code="unknown_alias")
+            self._write_aliases(kept)
 
     def reload(self) -> None:
         self.state = self._replay(self.ledger_dir)

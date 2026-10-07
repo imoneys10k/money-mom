@@ -59,22 +59,25 @@ git clone https://github.com/imoneys10k/money-mom && cd money-mom
 python -m pip install -e .
 
 export MONEY_MOM_HOME=~/MoneyMom        # 账本放在仓库之外
-money-mom init
-money-mom open Assets:招行 --date 2026-10-01
-money-mom open Income:工资 --date 2026-10-01
-money-mom open Expenses:餐饮 --date 2026-10-01
+money-mom init --template cn --date 2026-01-01      # 中文账户树：现金、支付宝、微信、银行卡……
 
-money-mom add --date 2026-10-01 --narration 工资 \
-  --posting "Assets:招行 18500.00 CNY" --posting "Income:工资 -18500.00 CNY"
-money-mom add --date 2026-10-07 --payee 瑞幸 \
-  --posting "Expenses:餐饮 38.00 CNY" --posting "Assets:招行 -38.00 CNY"
+money-mom transfer 20000 --from 期初 --to 银行卡 --date 2026-01-02   # 期初余额
+money-mom income 18500 --to 银行卡 --category 工资 --date 2026-10-01
+money-mom spend 38 --from 支付宝 --category 咖啡 --payee 瑞幸          # 借贷方向由程序决定
+money-mom spend 45 --from 微信 --category 咖                          # 名字不确定：不猜，记为待确认
 
-money-mom balance                  # 精确到分的余额
-money-mom check                    # 重放整个账本并复核断言
+money-mom pending                                  # 看有什么等你确认
+money-mom confirm <ID> --category 餐饮:聚餐         # 按名字补全，再入账
+money-mom balance                                  # 精确到分的余额
+money-mom check                                    # 重放整个账本并复核断言
 money-mom query "SELECT month, account, amount FROM v_monthly"
 ```
 
-写入不平衡的账会被拒绝，退出码为 1；加 `--json` 得到给 agent 解析的结构化结果。待确认的交易用 `--status pending` 加 `--posting "? 200 CNY"`（`?` 表示分类未定），之后用 `confirm` 入账。完整命令见 `money-mom --help`。
+要点：
+
+- **从不靠猜。** 账户名只接受全名、别名（`money-mom alias add 招行卡 Assets:银行卡`）、或唯一匹配的末段（`咖啡` 即 `Expenses:餐饮:咖啡`）。说得含糊时整笔记为待确认，并列出候选账户。`--strict` 改为直接报错，`--dry-run` 只预览不写入。
+- **置信度。** agent 记账时可带 `--confidence`，低于 0.9（可在 `money-mom.toml` 的 `auto_post_confidence` 调整）先记为待确认。
+- 不平衡的账会被拒绝，退出码为 1；加 `--json` 得到给 agent 解析的结构化结果。需要手写分录时用 `money-mom add --posting "账户 金额 币种"`。完整命令见 `money-mom --help`。
 
 ## 开发
 

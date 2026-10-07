@@ -15,6 +15,9 @@
 - SQLite 缓存（`cache.sqlite`，可随时删除）：按事件流指纹自动重建；`query` 只允许单条只读 SELECT（只读打开 + SQLite 授权器 + 5 秒超时 + 行数上限）。
 
 - 命令行表格按显示宽度对齐，中文账户名不再错位。
+- 结构化意图 `spend` / `income` / `transfer`：agent 只说业务含义，借贷方向由程序决定；账户名按全名、别名、唯一末段解析，**拿不准不猜**——未解析的名字或低于 `auto_post_confidence`（默认 0.9）的置信度记为待确认，并附候选账户；`--strict` 改为报错，`--dry-run` 只预览。
+- `confirm ID --category/--from/--to` 按槽位名补全待确认的意图记录。
+- `init --template cn|en`（中文与英文账户树，含别名）、`alias add|list|remove`、`resolve`。
 
 ### Changed
 - 设计文档：确定 Python 标准库内核、npm 轻量启动器、Agent Skills 标准发布、引擎与 skill 分离并锁定版本。

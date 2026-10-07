@@ -19,10 +19,11 @@
 - [x] 事件流存储：只追加、按月分文件、`void` 冲销、跨进程文件锁、整批全有或全无
 - [x] SQLite 缓存：指纹校验、按需重建、只读沙箱（授权器 + 超时 + 行数上限），含 `v_postings` / `v_pending` / `v_balances` / `v_monthly` 视图
 - [x] CLI：`init` / `open` / `close` / `add`（含 `--from-json` 批量原子写入）/ `confirm` / `void` / `assert` / `check` / `balance` / `pending` / `accounts` / `show` / `query`，均支持 `--json`
-- [ ] 结构化意图（spend / income / transfer）→ 分录渲染
-- [ ] propose → validate → commit 流程；待确认区与 `!` 状态（内核已支持 pending / confirm，意图层与待确认区命令待做）
+- [x] 结构化意图 `spend` / `income` / `transfer` → 分录渲染；名字解析（全名、别名、唯一末段；子串只作候选，从不自动采纳）；`--dry-run`、`--strict`
+- [x] propose → validate → commit：未解析的名字或低于阈值（默认 0.9）的置信度一律记为待确认，`pending` 列出，`confirm ID --category 餐饮` 按槽位补全
 - [x] 余额断言与锁定（含人工覆盖、agent 不可覆盖）
-- [ ] 账户树模板（中文，国内起步）
+- [x] 账户树模板：`init --template cn|en`（含别名）；`alias` 与 `resolve` 命令
+- [ ] 更多意图：`refund`（退款）、借出与还款、跨币种转账（随 M5）
 - [ ] 导出 Beancount，并以 `bean-check` 做差分测试（开发期依赖，非运行时依赖）
 - [ ] `SKILL.md` 与 agent 指令文件
 - [ ] 评测集 v0 与合成 demo 账本（不含任何真实数据）
