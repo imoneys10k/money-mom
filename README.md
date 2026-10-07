@@ -3,7 +3,7 @@
 **让 AI 像妈妈一样帮你管钱。**
 *Let your AI look after your money like Mom would.*
 
-> 状态：**pre-alpha**。目前只有账本内核（Python 库，已测试），**还没有命令行、skill 和可安装的版本**，下面的用法是目标形态，进度见 [ROADMAP.md](ROADMAP.md)。
+> 状态：**pre-alpha**。已有账本内核和命令行（可在本地跑，已测试），**还没有 skill，也没有发布到 PyPI / npm**。下面“目标形态”里的对话是最终要达到的样子，进度见 [ROADMAP.md](ROADMAP.md)。
 
 Money Mom 是一个装进 AI agent（Claude Code、Codex 等）的**记账能力**。你不用打开记账 App：说一句话或丢一个文件，AI 帮你记账、查账、对账；账本是你自己电脑上的文本文件，不被任何公司锁住。
 
@@ -49,6 +49,32 @@ AI 只负责理解你的话，**账由程序记**：
 
 - **通用**：普通人的日常记账，说话就能记。
 - **专攻**：多地区、多账户的投资者——国内支付、港美银行与券商、多币种净资产（计划中的“投资者包”）。
+
+## 现在就能试的（命令行）
+
+需要 Python 3.11+。目前要从源码安装：
+
+```bash
+git clone https://github.com/imoneys10k/money-mom && cd money-mom
+python -m pip install -e .
+
+export MONEY_MOM_HOME=~/MoneyMom        # 账本放在仓库之外
+money-mom init
+money-mom open Assets:招行 --date 2026-10-01
+money-mom open Income:工资 --date 2026-10-01
+money-mom open Expenses:餐饮 --date 2026-10-01
+
+money-mom add --date 2026-10-01 --narration 工资 \
+  --posting "Assets:招行 18500.00 CNY" --posting "Income:工资 -18500.00 CNY"
+money-mom add --date 2026-10-07 --payee 瑞幸 \
+  --posting "Expenses:餐饮 38.00 CNY" --posting "Assets:招行 -38.00 CNY"
+
+money-mom balance                  # 精确到分的余额
+money-mom check                    # 重放整个账本并复核断言
+money-mom query "SELECT month, account, amount FROM v_monthly"
+```
+
+写入不平衡的账会被拒绝，退出码为 1；加 `--json` 得到给 agent 解析的结构化结果。待确认的交易用 `--status pending` 加 `--posting "? 200 CNY"`（`?` 表示分类未定），之后用 `confirm` 入账。完整命令见 `money-mom --help`。
 
 ## 开发
 

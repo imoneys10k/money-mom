@@ -1,0 +1,443 @@
+"""Command line interface.
+
+Every command prints readable text by default and a single JSON document with `--json`:
+``{"ok": true, "data": ...}`` or ``{"ok": false, "error": {...}}``. Exit codes: 0 success,
+1 the ledger refused or could not do it, 2 the command line itself was wrong.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import sys
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Callable
+
+from . import __version__
+from .cache import open_cache, run_query
+from .errors import LedgerError
+from .ledger import TONES, Ledger
+
+DEFAULT_HOME = "~/MoneyMom"
+JSON_TXN_FIELDS = {"date", "status", "narration", "payee", "postings", "import_hash", "source", "confidence", "meta"}
+
+
+class UsageError(LedgerError):
+    code = "usage_error"
+
+
+def _today() -> str:
+    return dt.date.today().isoformat()
+
+
+def _fmt(amount: Decimal) -> str:
+    return format(amount, "f")
+
+
+def _dump(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def _ledger_path(args: argparse.Namespace) -> Path:
+    return Path(args.ledger or os.environ.get("MONEY_MOM_HOME") or DEFAULT_HOME).expanduser()
+
+
+def _actor(args: argparse.Namespace) -> tuple[str, str]:
+    raw = args.actor or os.environ.get("MONEY_MOM_ACTOR") or "human:user"
+    kind, sep, name = raw.partition(":")
+    if not sep or kind not in ("human", "agent") or not name.strip():
+        raise UsageError(f"--actor must look like human:NAME or agent:NAME, got {raw!r}")
+    return kind, name
+
+
+def _parse_posting(spec: str) -> dict[str, str | None]:
+    parts = spec.rsplit(None, 2)
+    if len(parts) != 3:
+        raise UsageError(f'posting {spec!r} must be "ACCOUNT AMOUNT CCY", e.g. "Expenses:Dining 38.00 CNY"')
+    account, amount, ccy = parts
+    return {"account": None if account == "?" else account, "amount": amount, "ccy": ccy}
+
+
+def _source(args: argparse.Namespace) -> dict[str, str] | None:
+    if not (args.source_type or args.source_ref or args.source_sha256):
+        return None
+    if not args.source_type:
+        raise UsageError("--source-ref and --source-sha256 need --source-type")
+    out = {"type": args.source_type}
+    if args.source_ref:
+        out["ref"] = args.source_ref
+    if args.source_sha256:
+        out["sha256"] = args.source_sha256
+    return out
+
+
+def _load_json(path: str) -> Any:
+    try:
+        text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    except OSError as err:
+        raise UsageError(f"cannot read {path}: {err.strerror or err}") from None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as err:
+        raise UsageError(f"{path} is not valid JSON: {err}") from None
+
+
+def _override_meta(args: argparse.Namespace, meta: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    merged = dict(meta or {})
+    if getattr(args, "override_lock", None):
+        merged["override_lock"] = args.override_lock
+    return merged or None
+
+
+def _txn_summary(ledger: Ledger, event_id: str) -> dict[str, Any]:
+    rec = ledger.state.txns[event_id]
+    return {"id": rec.id, "date": rec.date.isoformat(), "status": rec.status}
+
+
+def _postings_json(postings) -> list[dict[str, Any]]:
+    return [{"account": p.account, "amount": _fmt(p.amount), "ccy": p.ccy} for p in postings]
+
+
+def _table(headers: list[str], rows: list[list[Any]]) -> str:
+    cells = [[("NULL" if v is None else str(v)) for v in row] for row in rows]
+    widths = [max([len(h)] + [len(r[i]) for r in cells]) for i, h in enumerate(headers)]
+    lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths)).rstrip()]
+    lines.append("  ".join("-" * w for w in widths))
+    lines += ["  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip() for row in cells]
+    return "\n".join(lines)
+
+
+# ---- commands: each returns (data, human_text) -----------------------------------------
+
+
+def cmd_init(args: argparse.Namespace) -> tuple[Any, str]:
+    root = _ledger_path(args)
+    Ledger.init(root, base_currency=args.base_currency, tone=args.tone)
+    data = {"path": str(root), "base_currency": args.base_currency, "tone": args.tone}
+    return data, f"Created a Money Mom ledger at {root}"
+
+
+def cmd_open(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    ev = ledger.open_account(
+        args.account, args.date or _today(), currencies=args.currency or None,
+        actor=_actor(args), meta=_override_meta(args),
+    )
+    return {"id": ev.id, "account": args.account}, f"Opened {args.account}"
+
+
+def cmd_close(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    ev = ledger.close_account(args.account, args.date or _today(), actor=_actor(args))
+    return {"id": ev.id, "account": args.account}, f"Closed {args.account}"
+
+
+def _txn_items(args: argparse.Namespace) -> list[dict[str, Any]]:
+    flags = {
+        "date": args.date, "status": args.status, "narration": args.narration, "payee": args.payee,
+        "import_hash": args.import_hash,
+    }
+    if args.from_json is not None:
+        if args.posting or any(v is not None for v in flags.values()):
+            raise UsageError("--from-json cannot be combined with --posting/--date/--status/--narration/--payee/--import-hash")
+        data = _load_json(args.from_json)
+        items = data if isinstance(data, list) else [data]
+        if not items or not all(isinstance(i, dict) for i in items):
+            raise UsageError("--from-json must contain a transaction object or a non-empty list of them")
+        for item in items:
+            unknown = set(item) - JSON_TXN_FIELDS
+            if unknown:
+                raise UsageError(f"unknown transaction field(s) {sorted(unknown)}; allowed: {sorted(JSON_TXN_FIELDS)}")
+        return [dict(i) for i in items]
+    if not args.posting:
+        raise UsageError("give at least two --posting values, or use --from-json")
+    item = {k: v for k, v in flags.items() if v is not None}
+    item["postings"] = [_parse_posting(p) for p in args.posting]
+    return [item]
+
+
+def cmd_add(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    actor = _actor(args)
+    flag_source = _source(args)
+    events = []
+    for item in _txn_items(args):
+        item.setdefault("date", _today())
+        item.setdefault("status", "posted")
+        meta = item.pop("meta", None)
+        if meta is not None and not isinstance(meta, dict):
+            raise UsageError("meta must be an object")
+        source = item.pop("source", None) or flag_source
+        confidence = item.pop("confidence", None)
+        if confidence is None:
+            confidence = args.confidence
+        events.append(
+            ledger.new_event(
+                "txn", actor=actor, source=source, confidence=confidence,
+                meta=_override_meta(args, meta), **item,
+            )
+        )
+    written = ledger.append_many(events, clamp_ts=True)
+    data = [_txn_summary(ledger, e.id) for e in written]
+    lines = [f"Recorded {d['status']} transaction {d['id']} dated {d['date']}" for d in data]
+    return data, "\n".join(lines)
+
+
+def cmd_confirm(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    postings = [_parse_posting(p) for p in args.posting] if args.posting else None
+    ev = ledger.append(
+        ledger.new_event(
+            "confirm", actor=_actor(args), meta=_override_meta(args), target=args.target, postings=postings
+        ),
+        clamp_ts=True,
+    )
+    return {"id": ev.id, "target": args.target}, f"Confirmed {args.target}"
+
+
+def cmd_void(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    ev = ledger.void(args.target, args.reason, actor=_actor(args), meta=_override_meta(args))
+    return {"id": ev.id, "target": args.target}, f"Voided {args.target}"
+
+
+def cmd_assert(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    ev = ledger.assert_balance(
+        args.account, args.date or _today(), args.amount, args.ccy, actor=_actor(args)
+    )
+    return (
+        {"id": ev.id, "account": args.account, "amount": args.amount, "ccy": args.ccy},
+        f"Balance of {args.account} is {args.amount} {args.ccy} as asserted",
+    )
+
+
+def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    problems = ledger.check()
+    state = ledger.state
+    data = {
+        "ok": not problems,
+        "events": len(state.events),
+        "transactions": sum(1 for r in state.txns.values() if r.status == "posted"),
+        "pending": len(state.pending()),
+        "problems": [{"code": p.code, "message": p.message, "event_id": p.event_id} for p in problems],
+    }
+    head = (
+        f"{'OK' if not problems else 'PROBLEMS'}: {data['events']} events, "
+        f"{data['transactions']} posted transactions, {data['pending']} pending"
+    )
+    body = "\n".join(f"  [{p.code}] {p.message}" for p in problems)
+    return data, head + ("\n" + body if body else "")
+
+
+def cmd_balance(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    as_of = dt.date.fromisoformat(args.as_of) if args.as_of else None
+    prefix = args.account
+    rows = []
+    for (account, ccy), amount in sorted(ledger.state.balances(as_of).items()):
+        if prefix and not (account == prefix or account.startswith(prefix + ":")):
+            continue
+        if amount == 0 and not args.all:
+            continue
+        rows.append({"account": account, "ccy": ccy, "amount": _fmt(amount)})
+    text = _table(["account", "amount", "ccy"], [[r["account"], r["amount"], r["ccy"]] for r in rows]) if rows else "No balances."
+    return {"as_of": args.as_of, "balances": rows}, text
+
+
+def cmd_pending(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    items = []
+    for rec in ledger.state.pending():
+        ev = rec.event
+        items.append(
+            {
+                "id": rec.id, "date": rec.date.isoformat(), "payee": ev.payee, "narration": ev.narration,
+                "postings": _postings_json(rec.postings), "confidence": ev.confidence,
+                "source": ev.source, "actor": f"{ev.actor_type}:{ev.actor_name}",
+            }
+        )
+    if not items:
+        return [], "Nothing is waiting for confirmation."
+    lines = []
+    for it in items:
+        label = it["payee"] or it["narration"] or ""
+        conf = "" if it["confidence"] is None else f"  confidence {it['confidence']}"
+        lines.append(f"{it['id']}  {it['date']}  {label}{conf}")
+        lines += [f"    {p['account'] or '?':<28} {p['amount']:>12} {p['ccy']}" for p in it["postings"]]
+    return items, "\n".join(lines)
+
+
+def cmd_accounts(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    items = [
+        {
+            "name": a.name, "opened": a.opened.isoformat(),
+            "closed": a.closed.isoformat() if a.closed else None,
+            "currencies": list(a.currencies) if a.currencies else None,
+        }
+        for a in sorted(ledger.state.accounts.values(), key=lambda a: a.name)
+    ]
+    rows = [[i["name"], i["opened"], i["closed"] or "", ",".join(i["currencies"] or [])] for i in items]
+    return items, _table(["account", "opened", "closed", "currencies"], rows) if rows else "No accounts yet."
+
+
+def cmd_show(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    state = ledger.state
+    if args.id in state.txns:
+        rec = state.txns[args.id]
+        kind, status = "txn", rec.status
+    elif args.id in state.assertions:
+        kind, status = "assert", "voided" if state.assertions[args.id].voided else "live"
+    else:
+        raise LedgerError(f"no transaction or assertion with id {args.id!r}", code="unknown_target")
+    related = [e.raw for e in state.events if e.id == args.id or getattr(e, "target", None) == args.id]
+    text = f"{kind} {args.id} ({status})\n" + "\n".join(_dump(r) for r in related)
+    return {"id": args.id, "kind": kind, "status": status, "events": related}, text
+
+
+def cmd_query(args: argparse.Namespace) -> tuple[Any, str]:
+    root = _ledger_path(args)
+    ledger = Ledger.open(root)
+    conn = open_cache(root, ledger.state)
+    try:
+        result = run_query(conn, args.sql, limit=args.limit)
+    finally:
+        conn.close()
+    text = _table(result["columns"], result["rows"]) if result["rows"] else "(no rows)"
+    if result["truncated"]:
+        text += f"\n(truncated at {args.limit} rows; use --limit to see more)"
+    return result, text
+
+
+# ---- plumbing --------------------------------------------------------------------------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
+    common.add_argument("--ledger", help=f"ledger directory (default: $MONEY_MOM_HOME or {DEFAULT_HOME})")
+    common.add_argument("--json", action="store_true", help="print one JSON document instead of text")
+    common.add_argument("--actor", help="who is writing: human:NAME or agent:NAME (default: $MONEY_MOM_ACTOR or human:user)")
+
+    parser = argparse.ArgumentParser(
+        prog="money-mom", parents=[common],
+        description="Money Mom: an append-only, double-entry ledger for AI agents.",
+    )
+    parser.add_argument("--version", action="version", version=f"money-mom {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    def command(name: str, func: Callable, help: str) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, parents=[common], help=help, description=help)
+        p.set_defaults(func=func)
+        return p
+
+    def lock_flag(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--override-lock", metavar="REASON", help="human only: write into a period locked by a balance assertion")
+
+    p = command("init", cmd_init, "create a new ledger")
+    p.add_argument("--base-currency", default="CNY")
+    p.add_argument("--tone", default="normal", choices=TONES)
+
+    p = command("open", cmd_open, "open an account")
+    p.add_argument("account")
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p.add_argument("--currency", action="append", help="restrict the account to this currency (repeatable)")
+    lock_flag(p)
+
+    p = command("close", cmd_close, "close an account (its balance must be zero)")
+    p.add_argument("account")
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+
+    p = command("add", cmd_add, "record a transaction (or several, atomically, with --from-json)")
+    p.add_argument("--posting", action="append", metavar='"ACCOUNT AMOUNT CCY"', help='one posting; use "?" as the account when unknown (pending only); repeatable')
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p.add_argument("--status", choices=("posted", "pending"), help="default: posted")
+    p.add_argument("--narration")
+    p.add_argument("--payee")
+    p.add_argument("--import-hash")
+    p.add_argument("--confidence", type=float, help="0 to 1")
+    p.add_argument("--source-type", choices=("chat", "file", "screenshot", "import", "manual"))
+    p.add_argument("--source-ref")
+    p.add_argument("--source-sha256")
+    p.add_argument("--from-json", metavar="FILE|-", help="read a transaction object or a list of them from a file or stdin")
+    lock_flag(p)
+
+    p = command("confirm", cmd_confirm, "turn a pending transaction into a posted one")
+    p.add_argument("target", help="id of the pending transaction")
+    p.add_argument("--posting", action="append", metavar='"ACCOUNT AMOUNT CCY"', help="replacement postings (repeatable)")
+    lock_flag(p)
+
+    p = command("void", cmd_void, "void a transaction or an assertion (nothing is deleted)")
+    p.add_argument("target")
+    p.add_argument("--reason", required=True)
+    lock_flag(p)
+
+    p = command("assert", cmd_assert, "assert an account balance at the end of a day")
+    p.add_argument("account")
+    p.add_argument("amount")
+    p.add_argument("ccy")
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+
+    command("check", cmd_check, "replay the whole ledger and re-verify every assertion")
+
+    p = command("balance", cmd_balance, "show balances (exact decimals)")
+    p.add_argument("--account", help="only this account and its children")
+    p.add_argument("--as-of", metavar="DATE")
+    p.add_argument("--all", action="store_true", help="include zero balances")
+
+    command("pending", cmd_pending, "list transactions waiting for confirmation")
+    command("accounts", cmd_accounts, "list accounts")
+
+    p = command("show", cmd_show, "show a transaction or assertion with all events that touch it")
+    p.add_argument("id")
+
+    p = command("query", cmd_query, "run one read-only SQL SELECT against the cache (tables: txns, postings, accounts, assertions, events; views: v_postings, v_pending, v_balances, v_monthly)")
+    p.add_argument("sql")
+    p.add_argument("--limit", type=int, default=1000)
+
+    return parser
+
+
+def _utf8_streams() -> None:
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    _utf8_streams()
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    for name in ("ledger", "json", "actor"):
+        if not hasattr(args, name):
+            setattr(args, name, False if name == "json" else None)
+    for name in ("date", "status", "narration", "payee", "import_hash", "confidence", "source_type",
+                 "source_ref", "source_sha256", "from_json", "override_lock", "currency", "posting"):
+        if not hasattr(args, name):
+            setattr(args, name, None)
+    try:
+        _actor(args)  # validate --actor / $MONEY_MOM_ACTOR even for read-only commands
+        data, text = args.func(args)
+    except LedgerError as err:
+        if args.json:
+            print(_dump({"ok": False, "error": err.to_dict()}))
+        else:
+            print(f"error: {err}", file=sys.stderr)
+        return 2 if isinstance(err, UsageError) else 1
+    print(_dump({"ok": True, "data": data}) if args.json else text)
+    if args.command == "check" and not data["ok"]:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -17,8 +17,8 @@
 
 - [x] 账户、分录、币种与高精度金额、借贷平衡校验（`src/money_mom/`，82 个测试）
 - [x] 事件流存储：只追加、按月分文件、`void` 冲销、跨进程文件锁、整批全有或全无
-- [ ] SQLite 缓存：由事件流重建，供 SQL 查询
-- [ ] CLI：`init` / `add` / `check` / `query` / `void`
+- [x] SQLite 缓存：指纹校验、按需重建、只读沙箱（授权器 + 超时 + 行数上限），含 `v_postings` / `v_pending` / `v_balances` / `v_monthly` 视图
+- [x] CLI：`init` / `open` / `close` / `add`（含 `--from-json` 批量原子写入）/ `confirm` / `void` / `assert` / `check` / `balance` / `pending` / `accounts` / `show` / `query`，均支持 `--json`
 - [ ] 结构化意图（spend / income / transfer）→ 分录渲染
 - [ ] propose → validate → commit 流程；待确认区与 `!` 状态（内核已支持 pending / confirm，意图层与待确认区命令待做）
 - [x] 余额断言与锁定（含人工覆盖、agent 不可覆盖）

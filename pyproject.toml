@@ -17,6 +17,9 @@ classifiers = [
   "Topic :: Office/Business :: Financial :: Accounting",
 ]
 
+[project.scripts]
+money-mom = "money_mom.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/imoneys10k/money-mom"
 
