@@ -39,7 +39,7 @@
 - [x] 仓库布局：`skills/money-mom/SKILL.md`，CI 里用 `skills-ref validate` 校验
 - [x] `INSTALL.md`：写给 agent 读的安装说明（校验 SHA-256），README 里放“一句话安装”提示词
 - [x] 通用安装器 `npx skills add` 已在隔离环境验证：文件放到 `~/.agents/skills`，Claude Code 软链接过去；**各 agent 内的对话效果尚未逐一实测**
-- [x] 发布 PyPI 包 `money-mom`（引擎）：**0.1.0a5 已发布**（2026-10-07；0.1.0a4 是第一个，可信发布，无需保存令牌；在隔离环境用 `uv tool install` 验证通过；PyPI、GitHub Release 与 INSTALL.md 的 wheel 哈希一致）。skill 目前通过 INSTALL.md 安装固定版本，改为 `uvx money-mom==x.y.z` 调用仍待做；发布步骤见 [docs/publishing.md](docs/publishing.md)
+- [x] 发布 PyPI 包 `money-mom`（引擎）：**0.1.0a6 已发布**（2026-10-07；0.1.0a4 是第一个，可信发布，无需保存令牌；在隔离环境用 `uv tool install` 验证通过；PyPI、GitHub Release 与 INSTALL.md 的 wheel 哈希一致）。skill 目前通过 INSTALL.md 安装固定版本，改为 `uvx money-mom==x.y.z` 调用仍待做；发布步骤见 [docs/publishing.md](docs/publishing.md)
 - [ ] 发布 npm 包 `money-mom`（轻量启动器，通过 uv 运行同版本的引擎，不自动安装任何东西）：**已写好并测试**（8 个单元测试、10 个变异测试、用真实 uvx 的端到端演练），PyPI 已发布，等 npm 账号与令牌就绪后手动触发 `release` 工作流的 `npm` 目标
 - [ ] `money-mom init`：创建账本目录（仓库之外）
 - [x] `money-mom doctor`：自检环境、版本、账本目录与权限
