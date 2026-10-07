@@ -123,6 +123,10 @@
 - **锁定（已确认）：** 某账户有未作废的断言后，涉及该账户的新交易、确认或作废，若日期不晚于该断言日期，一律拒绝。确需补记，须由**人**在事件的 `meta` 里写 `override_lock` 及原因；**agent 不能自行覆盖**。
 - 覆盖锁定之后旧断言会不再成立，`check` 会报告。处理办法是作废旧断言（`void` 指向它）并追加新断言，这样改动留有痕迹。
 
+## 导入的记录
+
+`import run` 写入的交易带有：`import_hash`（形如 `imp1-` 加 32 位十六进制）、`source`（`type` 为 `import`，`ref` 是文件名，`sha256` 是文件内容哈希）、`meta.import`（`mapping`、`line`、`file`）。分类没有命中规则的行是 `pending`，对应一侧的 `account` 为 `null`；`import recheck` 之后用 `confirm` 补全，并带 `meta.recheck`。
+
 ## 汇率 `price`
 
 ```json

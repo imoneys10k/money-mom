@@ -150,19 +150,71 @@ money-mom balance --account Assets --in CNY --json   # a total needs --account; 
 
 ## 4. Reconciling with a bank statement
 
-When the user gives you a statement balance:
+Compare the statement with the ledger, one account at a time:
 
 ```bash
-money-mom assert Assets:银行卡 12480.55 CNY --date 2026-09-30 --json
+money-mom reconcile 银行卡 cmb_2026-09.csv --map cmb --closing-from-statement --json
+money-mom reconcile 银行卡 --from-json rows.json --closing-balance 7332.50 --closing-date 2026-09-20 --json
 ```
 
-- **It passes:** that period is now locked. Tell the user it matches.
-- **`assertion_failed`:** report the expected, actual and difference. Look for a missing or duplicate entry with `query`, show the user what you found, and let them decide. Never add a plug entry to make it match.
-- **Later corrections inside a locked period** are refused (`period_locked`). Explain that, and that only the user can override it, knowingly.
+- **A CSV needs a saved mapping** (see Importing). **A PDF or screenshot:** read it yourself and pass the rows as JSON, `[{"date": "2026-09-03", "amount": "-68.00", "payee": "Netflix"}]`, where a positive amount is money *into* the account. Check the closing balance printed on the statement and pass it.
+- **Nothing is changed by comparing.** Read `data` and tell the user what you found, in plain words:
+  - `missing_in_ledger`: on the statement, not in the ledger. If `possible_double_charge` is true, the statement shows the same charge more than once: say so and suggest the user ask the bank; do not call it fraud. Record the missing rows (`import run`, or by hand) so the books match what the bank did.
+  - `missing_in_statement`: in the ledger, not on the statement. Ask the user whether it was a cash payment, another account, or a mistake.
+  - `amount_mismatches`: the same item with different amounts (a typo, or a price that rose). Show both amounts. After the user agrees, void the wrong entry and record the right one.
+  - `balance`: the closing balances and their `difference`. `explained_by_the_differences_listed` means fixing the listed items closes the gap.
+  - `pending_in_range`: entries still waiting for confirmation; they are not counted.
+- **Never add a plug entry to make it match.**
+- **When `data.clean` is true,** offer to seal it: `money-mom reconcile ... --assert`. That records a balance assertion and **locks the period**; explain this first. It refuses anything unclean (`reconcile_not_clean`).
+- **Later corrections inside a sealed period** are refused (`period_locked`). Explain that only the user can override it, knowingly.
+- Single checks still work: `money-mom assert 银行卡 7332.50 CNY --date 2026-09-20`.
 
-## 5. Importing a statement or a list
+## 5. Importing a statement
 
-Read the statement yourself (reading is harmless), then write the entries in **one atomic batch**: if any row is refused, nothing is written.
+Statements are CSV files whose layout differs per bank and changes over time, so each layout is described once in a **mapping** and then applied the same way every time. There are no built-in bank presets: write the mapping from the user's real file.
+
+1. **Look at the file:** `money-mom import inspect FILE --json`. It reports the encoding (GBK is common), the header row, a suggested mapping and `notes` for what it could not decide. **Show the user the notes and ask.** Two are always the user's to answer: for a day/month date such as 03/04/2026, which comes first; and which sign (or which `收/支` value) means money *into* the account, best checked against one transaction they remember.
+2. **Save a mapping:** write TOML and store it with `money-mom import save-map NAME -` (stdin). It is validated before it is stored.
+
+   ```toml
+   [columns]
+   date = "交易时间"
+   amount = "金额"
+   direction = "收/支"          # or: amount_in / amount_out for two amount columns
+   payee = "交易对方"
+   description = "商品说明"
+   id = "交易订单号"            # a stable id per row makes re-imports exact
+   balance = "余额"             # optional; lets reconcile read the closing balance
+
+   [format]
+   date = "%Y-%m-%d %H:%M:%S"
+   sign = "unsigned"            # or inflow_positive / outflow_positive (credit cards are often the latter)
+
+   [direction]
+   in = ["收入"]
+   out = ["支出"]
+   ignore = ["不计收支"]
+
+   [[skip]]
+   column = "交易状态"
+   values = ["交易关闭"]
+   ```
+
+3. **Try it first:** `money-mom import run FILE --map NAME --account 支付宝 --dry-run --actor agent:claude-code --confidence 0.9 --json`. Check `rows_read`, `posted`, `pending`, and what was `ignored` (with `ignored_examples`). A row that cannot be read stops everything and is named; nothing is half-imported.
+4. **Import for real:** the same command without `--dry-run`. As always an agent must pass `--confidence`: how sure you are that the mapping reads this file correctly. Below the threshold every row waits for the user (`held_for_confidence`).
+5. **Rows no rule matched are pending.** `data.unresolved_payees` groups them by payee. **Ask the user one question per payee** (for example "美团 appears 5 times, -312.00 in total: which category?"), then teach the answer:
+
+   ```bash
+   money-mom import rule-add --map NAME --match 美团 --account 外卖
+   money-mom import recheck --map NAME
+   ```
+
+   `recheck` settles every waiting row of that mapping that now matches. Rules never guess: unmatched rows stay pending. Use `--regex` for patterns and `--skip` instead of `--account` to drop rows.
+6. **Importing is safe to repeat.** Every row has a stable hash, so rows already in the ledger are skipped (`duplicates_skipped`). To bring in only newer rows, or to avoid a locked period, use `--since DATE`.
+7. **A transfer between the user's own accounts appears on both statements.** Import it from one side only: give the other mapping a `rule-add --skip` for it, or you will record it twice.
+8. After importing, offer to reconcile (section 4).
+
+For a source that is not a CSV (a PDF, a screenshot, a list the user typed), write the entries yourself in one atomic batch:
 
 ```bash
 money-mom add --from-json - --actor agent:claude-code --json <<'EOF'
@@ -176,9 +228,9 @@ money-mom add --from-json - --actor agent:claude-code --json <<'EOF'
 EOF
 ```
 
-- Give every row a stable `import_hash` so a second import cannot double-count.
+- Give every row a stable `import_hash`; a repeat is refused (`duplicate_import`).
 - Rows you cannot place with confidence: `"status": "pending"` with `"account": null` on the unknown side.
-- When a batch is refused, the error names the row (`event #N of this write`). Fix that row and send the batch again.
+- When a batch is refused the error names the row (`event #N of this write`). Fix it and send the batch again.
 - Tell the user the counts: how many posted, how many pending.
 
 ## 6. Not covered yet
@@ -194,7 +246,10 @@ Exit code 1 means the ledger said no; 2 means the command line was wrong. With `
 | `unresolved_account` | A name could not be resolved. Use the `candidates`, or ask the user. |
 | `unbalanced` | Only possible with `add`; recheck the amounts. Prefer the intent commands. |
 | `confidence_required`, `confidence_too_low` | Pass an honest `--confidence`; below the threshold record it as pending. |
-| `duplicate_import` | Already recorded. Tell the user; do not force it. |
+| `duplicate_import` | Already recorded. Tell the user; do not force it. (`import run` skips repeats by itself.) |
+| `invalid_statement` | The file could not be read; the message names the lines. Check the mapping with `import inspect`, or `--encoding`. |
+| `invalid_mapping`, `unknown_mapping` | The mapping is invalid or not saved. Fix the TOML and `import save-map` it again. |
+| `reconcile_not_clean` | `--assert` only seals a clean reconciliation. Show the user what is left. |
 | `period_locked`, `lock_override_denied` | The period was reconciled. Explain; only the user may override. |
 | `assertion_failed` | See Reconciling. |
 | `unknown_account` | Check `money-mom accounts`; offer to `open` one if the user wants it. |
