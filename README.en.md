@@ -121,6 +121,7 @@ money-mom reconcile checking cmb-sep.csv --map cmb --closing-from-statement --as
 ```
 
 - **No built-in bank presets.** Export layouts change often, and a preset without real samples would be made up. `import inspect` helps you (or your agent) write the mapping and asks about what it cannot know, such as whether a date is day-first or which sign means money in.
+- **Alipay and WeChat Pay have draft mappings, not verified against a real export.** They are in [`skills/money-mom/references/mappings/`](skills/money-mom/references/mappings/), written from memory of those two layouts, and are only a starting point: compare them with your own file using `import inspect`, fix the mapping if the header differs, then spot-check a few rows with `--dry-run`. If the header does not match, the import refuses rather than writing wrong entries; each draft says so at the top, and also what it does not handle (for example, a row paid by a bank card also appears on that bank's statement, so import it from one side only).
 - **Re-importing is safe.** Every row has a stable hash, so rows already in the ledger are skipped; the batch is all-or-nothing, and a refused row is named by its statement line.
 - **Ask once, learn once.** Rows no rule matched are held as pending, grouped by payee; one answer becomes a rule and `recheck` settles the waiting history.
 - **Reconciliation finds missing and extra entries, amounts that disagree and charges that may have been taken twice**, and checks the closing balance; only a fully matching result can be sealed. A PDF statement is read by the agent and handed over as JSON; the program itself does not parse PDFs.
@@ -186,7 +187,7 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 | | |
 |---|---|
 | Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · on PyPI · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
+| Next | "Mom" tone levels · verify the Alipay and WeChat draft mappings against real exports, then promote them |
 | Later | npm launcher · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.

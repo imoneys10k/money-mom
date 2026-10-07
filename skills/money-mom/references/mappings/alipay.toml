@@ -1,0 +1,38 @@
+# DRAFT, NOT VERIFIED AGAINST A REAL EXPORT. 草案：未经真实导出文件验证。
+#
+# Alipay "交易明细" CSV, the layout with these columns (2021 and later), as remembered, not as tested on a file.
+# Before using it: run `money-mom import inspect FILE` on the user's own export. If the header differs from
+# [columns] below, fix this mapping first. Always run `import run --dry-run` and check a few rows by hand.
+#
+# What it does:
+#   - rows with 收/支 = 不计收支 (money moved, not earned or spent) are ignored and counted
+#   - rows with 交易状态 = 交易关闭 (closed, nothing happened) are skipped
+#   - any other 收/支 value stops the import and names the line; nothing is half-imported
+# What it does NOT do:
+#   - it knows nothing about which card paid. A row paid by a bank card also appears on that bank's statement:
+#     import it from one side only (rule-add --skip), or it is recorded twice.
+#   - it assigns no categories. Rows with no rule wait as pending, grouped by payee; teach rules with `rule-add`.
+#
+# Save with:  money-mom import save-map alipay - < alipay.toml
+ccy = "CNY"
+
+[columns]
+date = "交易时间"
+amount = "金额"
+direction = "收/支"
+payee = "交易对方"
+description = "商品说明"
+id = "交易订单号"
+
+[format]
+date = "%Y-%m-%d %H:%M:%S"
+sign = "unsigned"
+
+[direction]
+in = ["收入"]
+out = ["支出"]
+ignore = ["不计收支"]
+
+[[skip]]
+column = "交易状态"
+values = ["交易关闭"]

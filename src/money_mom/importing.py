@@ -658,10 +658,11 @@ def inspect_statement(path: Path, *, encoding: str | None = None, sample: int = 
     for delimiter in DELIMITERS:
         rows = _reader(text, delimiter)[:80]
         widths = Counter(len(c) for _, c in rows if any(c))
-        if not widths:
+        # many one-column lines of explanation above the table must not outvote the table itself
+        wide = [(count * width, width) for width, count in widths.items() if width >= 3]
+        if not wide:
             continue
-        width, count = widths.most_common(1)[0]
-        score = count * (width >= 3) * width
+        score, width = max(wide)
         if best is None or score > best[0]:
             best = (score, delimiter, width)
     if best is None or best[0] == 0:

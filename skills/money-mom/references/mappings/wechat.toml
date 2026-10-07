@@ -1,0 +1,36 @@
+# DRAFT, NOT VERIFIED AGAINST A REAL EXPORT. 草案：未经真实导出文件验证。
+#
+# WeChat Pay 账单 CSV (微信支付账单明细), as remembered, not as tested on a file. WeChat exports an .xlsx by
+# default: open it and save as CSV (UTF-8) first, or ask the user to export the CSV version if offered.
+# Before using it: run `money-mom import inspect FILE` on the user's own export. If the header differs from
+# [columns] below, fix this mapping first. Always run `import run --dry-run` and check a few rows by hand.
+#
+# What it does:
+#   - amounts such as "¥38.00" are read; 收/支 = "/" (neutral: wallet top-up, withdrawal, own transfers) is ignored
+#   - any other 收/支 value stops the import and names the line; nothing is half-imported
+# What it does NOT do:
+#   - refunds: an order that shows 已全额退款 is kept as a payment, and its refund appears as a separate 收入 row.
+#     Both are imported, so they net to zero; do not skip only one of them.
+#   - it knows nothing about which card paid (支付方式). A row paid by a bank card also appears on that bank's
+#     statement: import it from one side only (rule-add --skip), or it is recorded twice.
+#   - it assigns no categories. Rows with no rule wait as pending, grouped by payee; teach rules with `rule-add`.
+#
+# Save with:  money-mom import save-map wechat - < wechat.toml
+ccy = "CNY"
+
+[columns]
+date = "交易时间"
+amount = "金额(元)"
+direction = "收/支"
+payee = "交易对方"
+description = "商品"
+id = "交易单号"
+
+[format]
+date = "%Y-%m-%d %H:%M:%S"
+sign = "unsigned"
+
+[direction]
+in = ["收入"]
+out = ["支出"]
+ignore = ["/"]

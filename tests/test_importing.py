@@ -179,6 +179,12 @@ class Reading(FileCase):
         self.assertEqual(st.filename, "alipay.csv")
         self.assertEqual(len(st.sha256), 64)
 
+    def test_a_long_preamble_does_not_hide_the_table_from_inspect(self):
+        long_preamble = [f"说明第{i}行" for i in range(40)]
+        data = inspect_statement(self.csv(preamble=long_preamble))
+        self.assertEqual((data["header_line"], data["rows"]), (41, 7))
+        self.assertIn("交易时间", data["columns_in_file"])
+
     def test_utf8_with_bom_and_other_delimiters(self):
         path = self.csv(encoding="utf-8-sig")
         self.assertEqual(self.read(path).encoding, "utf-8-sig")
