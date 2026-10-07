@@ -24,7 +24,7 @@ Money Mom 是一个装进 AI agent（Claude Code、Codex、Cursor、Gemini CLI�
 
 它做的不是“又一个记账软件”，而是让 AI 记账这件事**值得信任**：AI 只负责听懂你的话，**账由程序来记、来校验**。
 
-> **状态：pre-alpha（`0.1.0a5`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a5"`），npm 启动器稍后发布，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
+> **状态：pre-alpha（`0.1.0a6`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a6"`），npm 启动器稍后发布，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
 
 ## 一句话安装
 

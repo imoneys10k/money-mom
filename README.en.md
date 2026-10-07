@@ -24,7 +24,7 @@ Money Mom is a **bookkeeping skill** for AI agents (Claude Code, Codex, Cursor, 
 
 It is not another budgeting app. It makes AI bookkeeping **trustworthy**: the AI only understands what you said, and **a program keeps and checks the books**.
 
-> **Status: pre-alpha (`0.1.0a5`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a5"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
+> **Status: pre-alpha (`0.1.0a6`).** The ledger core, the command line, statement import and reconciliation, many currencies, the monthly report, charts and subscription alerts work and are tested. It is on [PyPI](https://pypi.org/project/money-mom/) (`uv tool install "money-mom==0.1.0a6"`), the npm launcher follows later, and investor features are still ahead (see the [roadmap](ROADMAP.md)). Don't make it the only copy of your books.
 
 ## One-sentence install
 
