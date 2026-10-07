@@ -101,6 +101,27 @@ money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
 
+## Statement import and reconciliation
+
+Every bank and wallet exports a different layout, so you describe it once in a **mapping file** and it is applied the same way every time:
+
+```bash
+money-mom import inspect bank.csv                     # find the encoding, header and what each column is; suggestions only
+money-mom import save-map bank mapping.toml           # validate and save
+money-mom import run bank.csv --map bank --account checking --dry-run   # a trial run first
+money-mom import run bank.csv --map bank --account checking
+money-mom import rule-add --map bank --match Starbucks --account coffee  # rows no rule matched wait as pending; answer once, it becomes a rule
+money-mom import recheck --map bank                   # settle the waiting rows with the new rule
+
+money-mom reconcile checking cmb-sep.csv --map cmb --closing-from-statement             # compare line by line
+money-mom reconcile checking cmb-sep.csv --map cmb --closing-from-statement --assert    # seal (lock the period) only if everything matches
+```
+
+- **No built-in bank presets.** Export layouts change often, and a preset without real samples would be made up. `import inspect` helps you (or your agent) write the mapping and asks about what it cannot know, such as whether a date is day-first or which sign means money in.
+- **Re-importing is safe.** Every row has a stable hash, so rows already in the ledger are skipped; the batch is all-or-nothing, and a refused row is named by its statement line.
+- **Ask once, learn once.** Rows no rule matched are held as pending, grouped by payee; one answer becomes a rule and `recheck` settles the waiting history.
+- **Reconciliation finds missing and extra entries, amounts that disagree and charges that may have been taken twice**, and checks the closing balance; only a fully matching result can be sealed. A PDF statement is read by the agent and handed over as JSON; the program itself does not parse PDFs.
+
 ## Many currencies
 
 You are not tied to one currency:
@@ -132,8 +153,8 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · intents (spend / income / transfer) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | Monthly report · bank reconciliation and statement import (Alipay, WeChat, bank PDFs) · subscription and anomaly alerts · "Mom" tone levels |
+| Done | Ledger core · command line · SQLite queries · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Next | Monthly report · subscription and anomaly alerts · "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
 | Later | PyPI / npm · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.

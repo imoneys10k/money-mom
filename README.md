@@ -101,6 +101,27 @@ money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # 自检
 ```
 
+## 账单导入与对账
+
+每家银行、每个钱包的导出文件格式都不一样，所以先用一份**映射文件**描述一次，之后每次都按同样的方式处理：
+
+```bash
+money-mom import inspect 支付宝账单.csv                 # 探测编码、表头和各列含义，给出建议（含糊处不替你决定）
+money-mom import save-map alipay 映射.toml              # 校验后保存
+money-mom import run 支付宝账单.csv --map alipay --account 支付宝 --dry-run   # 先试运行
+money-mom import run 支付宝账单.csv --map alipay --account 支付宝
+money-mom import rule-add --map alipay --match 美团 --account 外卖   # 没命中规则的行会待确认，回答一次就变成规则
+money-mom import recheck --map alipay                   # 把等着的行按新规则补全
+
+money-mom reconcile 银行卡 招行9月.csv --map cmb --closing-from-statement             # 逐笔对账
+money-mom reconcile 银行卡 招行9月.csv --map cmb --closing-from-statement --assert    # 全部对上才封存（锁定该期间）
+```
+
+- **没有内置的银行预设。** 导出格式常变，而预设没有真实样本就是编造；`import inspect` 会帮你（或你的 agent）写出映射，日期是日/月先后、哪个符号代表收入这类含糊处会问你。
+- **重复导入是安全的。** 每行有稳定的哈希，已经在账本里的行会被跳过；整批全有或全无，被拒绝的行会按账单行号指出。
+- **问一次，学一次。** 没有规则命中的行记为待确认，并按对方分组；回答一次写成规则，`recheck` 把等着的历史行一并补全。
+- **对账找出漏记、多记、金额不符，以及可能被扣了两次的款项**，并核对期末余额；只有完全对上才允许封存。PDF 账单由 agent 读取后以 JSON 提交，程序本身不解析 PDF。
+
 ## 多币种
 
 不必固定一个币种：
@@ -132,8 +153,8 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 | | |
 |---|---|
-| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 意图层（spend / income / transfer）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
-| 下一步 | 月报 · 银行对账与账单导入（支付宝、微信、银行 PDF）· 订阅与异常提醒 · “妈妈”语气档位 |
+| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
+| 下一步 | 月报 · 订阅与异常提醒 · “妈妈”语气档位 · 微信账单的内置预设（需要真实导出样本） |
 | 之后 | 发布到 PyPI / npm · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
 
 不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。
