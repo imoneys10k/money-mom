@@ -11,7 +11,7 @@
 - [x] 决策：实现语言为 Python 标准库，npm 仅做轻量启动器
 - [x] 决策：折中路线——自研内核与事件流存储（JSONL + SQLite 缓存），同时导出 Beancount
 - [x] 调研各 agent 的 skill 加载方式，结论见 [docs/agents.md](docs/agents.md)（MCP 配置留到 M6 再查）
-- [ ] 数据模型 v0 规格（docs/data-model.md）
+- [x] 数据模型 v0 规格草案：[docs/data-model.md](docs/data-model.md)（待你确认后再进入实现）
 
 ## M1 · v0.1 内核与“记一笔”
 
