@@ -52,7 +52,7 @@ You   Why did I spend so much on takeout this month?
 Mom   612 more than last month, mostly one 486 dinner on the 20th. Every number links to its entry.
 ```
 
-> This is the target experience. Recording, follow-up questions and querying are implemented through the skill and command line; the savings-rate remark depends on the monthly report, which is planned.
+> This is the target experience. Recording, follow-up questions and querying are implemented through the skill and command line; the monthly report is `money-mom report`; the "Mom" tone levels for her remarks are planned.
 
 ## Why you can trust it
 
@@ -97,6 +97,7 @@ money-mom spend 45 --from card --category cof                              # uns
 money-mom pending                                  # what is waiting for you
 money-mom confirm <ID> --category restaurants      # fill it in by name, then it posts
 money-mom balance                                  # exact balances
+money-mom report --month 2026-09                   # monthly report: income, spending by category, vs last month, net worth
 money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
@@ -153,8 +154,8 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | Monthly report · subscription and anomaly alerts · "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
+| Done | Ledger core · command line · SQLite queries · monthly report · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Next | Chart output · subscription and anomaly alerts · "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
 | Later | PyPI / npm · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.

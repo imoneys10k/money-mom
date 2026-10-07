@@ -58,6 +58,7 @@ Extra flags for those three: `--ccy` (a code or word such as `USD` or `美元`; 
 | `pending` | Entries waiting for confirmation. |
 | `currency TEXT [--ccy C] [--account NAME ...]` | Which currency a piece of text means, and how it was decided. |
 | `networth [--in CCY] [--as-of D]` | Assets minus liabilities per currency and as one total, from stored rates. |
+| `report [--month YYYY-MM] [--in CCY] [--top N]` | Monthly report (read-only): income, spending, net and savings rate, spending by category with change from last month, the biggest items, net worth change, and what to double-check. |
 | `rates update [--currency C ...] [--date D] [--dry-run]` | **The only command that uses the network.** Fetch ECB daily reference rates into the base currency and store them with their source. Sends only currency codes and a date. |
 | `rates set BASE QUOTE RATE --source TEXT [--date D]` | Record a rate yourself: 1 BASE = RATE QUOTE. A source is required. |
 | `rates list [--base B] [--quote Q]` | The latest stored rate for each pair. |

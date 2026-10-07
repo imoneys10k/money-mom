@@ -134,6 +134,19 @@ money-mom query "SELECT ..." --json             # read-only SQL
 
 Schema and ready-made queries are in [references/sql.md](references/sql.md).
 
+### Monthly report
+
+```bash
+money-mom report --json                       # this month so far
+money-mom report --month 2026-09 --in USD --json
+```
+
+- One read-only command gives income, spending, net and savings rate, spending by category with the change from last month, the biggest items, and the net worth change. Present those figures; do not recompute them yourself.
+- Read `data.notes` aloud in plain words. They say what the numbers leave out: entries still pending (not counted), a month still in progress (month to date is not comparable with a full month), currencies with no rate, rates that are stale.
+- `null` is missing, not zero: no previous month means no comparison, and `partial: true` means some currency was left out of the converted figures. Never say "same as last month" or give a total that hides a `missing` currency.
+- Moving money between your own accounts and exchanging currencies are not income or spending, so they are not in the report; if the user expects one there, explain that.
+- Converted at the rate of the last day of the month (today for the current month), from stored rates only. This command never uses the network; offer `rates update` if rates are missing.
+
 ### Totals across currencies
 
 ```bash

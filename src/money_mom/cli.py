@@ -31,6 +31,7 @@ from .importing import (
 from .ledger import TONES, Ledger
 from .rates import convert_balances, fetch_frankfurter, update_rates
 from .reconcile import reconcile, rows_from_json, seal
+from .report import monthly_report
 from .templates import TEMPLATES, apply_template
 
 DEFAULT_HOME = "~/MoneyMom"
@@ -656,6 +657,67 @@ def cmd_networth(args: argparse.Namespace) -> tuple[Any, str]:
     return result, text
 
 
+def _signed(text: str | None) -> str:
+    if text is None:
+        return "-"
+    return text if text.startswith("-") or Decimal(text) == 0 else "+" + text
+
+
+def _report_text(r: dict[str, Any]) -> str:
+    ccy = r["in"]
+    head = f"{r['month']}" + (f"  (month to date, until {r['as_of']})" if r["in_progress"] else "")
+    lines = [f"Monthly report {head}, in {ccy}", ""]
+    partial = " (PARTIAL)" if r["partial"] else ""
+    lines.append(f"Income    {r['income']['total']:>12} {ccy}{partial}")
+    lines.append(f"Spending  {r['expenses']['total']:>12} {ccy}{partial}")
+    lines.append(f"Net       {_signed(r['net']):>12} {ccy}{partial}")
+    if r["savings_rate_percent"] is not None:
+        lines.append(f"Saved     {r['savings_rate_percent']:>11}% of income")
+    prev = r["previous"]
+    if prev["has_data"] and prev.get("expenses_change") is not None:
+        pct = f" ({_signed(prev['expenses_change_percent'])}%)" if prev["expenses_change_percent"] is not None else ""
+        lines.append(f"Spending vs {prev['month']}: {_signed(prev['expenses_change'])} {ccy}{pct}")
+    if r["categories"]:
+        lines += ["", "Where it went"]
+        rows = [
+            [c["category"], c["converted"] if c["converted"] is not None else "no rate",
+             "" if c["share_percent"] is None else f"{c['share_percent']}%",
+             _signed(c["change"]) if c["change"] is not None else ""]
+            for c in r["categories"]
+        ]
+        lines.append(_table(["category", ccy, "share", f"vs {prev['month']}"], rows))
+    if prev["dropped_categories"]:
+        lines.append(f"Spent on in {prev['month']} but not this month: {', '.join(prev['dropped_categories'])}")
+    if r["top_spending"]:
+        lines += ["", "Biggest items"]
+        lines.append(_table(
+            ["date", "what", "amount", "ccy"],
+            [[t["date"], t["payee"] or t["narration"] or t["account"], t["amount"], t["ccy"]] for t in r["top_spending"]],
+        ))
+    worth = r["net_worth"]
+    change = f" ({_signed(worth['change'])})" if worth["change"] is not None else ""
+    lines += ["", f"Net worth {worth['end']['total']} {ccy} on {worth['end']['as_of']}{change}"
+              + (" PARTIAL" if worth["end"]["partial"] or worth["start"]["partial"] else "")]
+    if r["checks"]["accounts_with_assertion"]:
+        lines.append(f"Balance checked this month: {', '.join(r['checks']['accounts_with_assertion'])}")
+    lines += [""] + [f"Note: {n}" for n in r["notes"]]
+    return "\n".join(lines).rstrip()
+
+
+def cmd_report(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    target = None
+    if args.target_ccy:
+        named = parse_currency(args.target_ccy)
+        if len(named) != 1:
+            raise UsageError(f"--in needs one currency, such as CNY or 人民币; got {args.target_ccy!r}")
+        target = named[0]
+    if args.top < 0:
+        raise UsageError("--top must not be negative")
+    result = monthly_report(ledger, args.month, target=target, top=args.top)
+    return result, _report_text(result)
+
+
 def cmd_rates(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     if args.rates_command == "update":
@@ -960,6 +1022,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p = command("networth", cmd_networth, "assets minus liabilities, per currency and as one total in --in (default: the base currency)")
     p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the total (default: the ledger's base currency)")
     p.add_argument("--as-of", metavar="DATE")
+
+    p = command("report", cmd_report, "monthly report: income, spending by category, comparison with last month, net worth change")
+    p.add_argument("--month", metavar="YYYY-MM", help="default: the current month (month to date)")
+    p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the totals (default: the ledger's base currency)")
+    p.add_argument("--top", type=int, default=5, help="how many of the biggest items to list (default 5)")
 
     p = command("rates", cmd_rates, "exchange rates: fetch (the only command that uses the network), set, list")
     rates_sub = p.add_subparsers(dest="rates_command", required=True, metavar="ACTION")

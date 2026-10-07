@@ -52,7 +52,7 @@ agent 会读 [INSTALL.md](INSTALL.md)：装好 `money-mom` 命令（锁定版本
 妈妈   比上月多了 612 元，主要是 20 号一顿聚餐 486 元。每个数字都能点回原始记录。
 ```
 
-> 以上是目标形态。其中“记账、追问、查账”已经由 skill 加命令行实现；“储蓄率点评”依赖月报，尚在计划中。
+> 以上是目标形态。其中“记账、追问、查账”已经由 skill 加命令行实现；月报由 `money-mom report` 提供；“妈妈”式的点评语气档位仍在计划中。
 
 ## 为什么可信
 
@@ -97,6 +97,7 @@ money-mom spend 45 --from 微信 --category 咖                          # 名�
 money-mom pending                                  # 看有什么等你确认
 money-mom confirm <ID> --category 餐饮:聚餐         # 按名字补全，再入账
 money-mom balance                                  # 精确到分的余额
+money-mom report --month 2026-09                   # 月报：收支、分类、和上月对比、净资产变化
 money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # 自检
 ```
@@ -153,8 +154,8 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 | | |
 |---|---|
-| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
-| 下一步 | 月报 · 订阅与异常提醒 · “妈妈”语气档位 · 微信账单的内置预设（需要真实导出样本） |
+| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
+| 下一步 | 图表输出 · 订阅与异常提醒 · “妈妈”语气档位 · 微信账单的内置预设（需要真实导出样本） |
 | 之后 | 发布到 PyPI / npm · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
 
 不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。
