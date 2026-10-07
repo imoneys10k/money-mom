@@ -63,7 +63,7 @@ npm 的“可信发布”（不用令牌）要求**包已经存在**，所以**�
 ## 发布当天
 
 1. 我确认 `main` 的测试全绿、INSTALL.md 里的校验和等于构建出的 wheel，然后（在你说“可以发布”之后）打标签 `v0.1.0a3`。
-2. 流水线：构建并校验 → 暂停等你批准 `pypi` → 发布到 PyPI → 暂停等你批准 `npm` → 发布到 npm → 创建 GitHub Release（发布说明取自仓库里的 `docs/release-notes/`）。
+2. 流水线：构建并校验 → 暂停等你批准 `pypi` → 发布到 PyPI → 创建 GitHub Release（发布说明取自仓库里的 `docs/release-notes/`）。npm 单独发布：PyPI 上线后，在 Actions 页面运行 `release` 工作流，`target` 选 `npm`，再批准 `npm` 环境。
 3. 我在隔离环境里验证 `uv tool install "money-mom==0.1.0a3"` 和 `npx money-mom --version` 真的能用，然后把 README、INSTALL 和主页更新为这两条更简单的安装方式。
 
 预发布版本（带 `a`、`b`、`rc`）默认不会被 `pip install money-mom` 装上，要写明确的版本号或加 `--pre`；这是预期行为，文档里写的都是带版本号的命令。

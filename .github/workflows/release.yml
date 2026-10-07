@@ -6,7 +6,8 @@ name: release
 #   - waits for a human to approve each registry (the `pypi` and `npm` environments have required reviewers);
 #   - uses Trusted Publishing (OIDC) for PyPI, so no PyPI password or token is stored anywhere.
 #
-# A tag `vX.Y.Z...` publishes to PyPI, then npm, then creates the GitHub release.
+# A tag `vX.Y.Z...` publishes to PyPI, then creates the GitHub release. npm is published separately, by hand
+# (target "npm"), once that version exists on PyPI: the launcher pins it.
 # Run it by hand to rehearse: "build-only" checks everything and publishes nothing; "testpypi" uploads to TestPyPI.
 
 on:
@@ -15,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "build-only: verify and build, publish nothing. testpypi: also upload to TestPyPI."
+        description: "build-only: verify and build, publish nothing. testpypi: also upload to TestPyPI. npm: publish the launcher (the version must already be on PyPI)."
         type: choice
-        options: [build-only, testpypi]
+        options: [build-only, testpypi, npm]
         default: build-only
 
 permissions:
@@ -137,8 +138,8 @@ jobs:
 
   publish-npm:
     name: publish to npm
-    needs: [build, publish-pypi]  # the launcher pins a PyPI version, so that version must already exist
-    if: github.ref_type == 'tag'
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'npm'
     runs-on: ubuntu-latest
     environment:
       name: npm
@@ -146,6 +147,10 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: the launcher pins a PyPI version, so that version must already exist
+        run: |
+          curl -fsS "https://pypi.org/pypi/money-mom/${{ needs.build.outputs.version }}/json" > /dev/null \
+            || { echo "::error::money-mom ${{ needs.build.outputs.version }} is not on PyPI yet"; exit 1; }
       - uses: actions/download-artifact@v4
         with:
           name: npm-dist

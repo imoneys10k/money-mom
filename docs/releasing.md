@@ -39,7 +39,8 @@
    git push origin vX.Y.Z
    ```
 
-10. 流水线 `release.yml` 依次：核对版本、标签、校验和 → 跑全部测试 → 构建一次 → 暂停等批准 `pypi` → 发布到 PyPI → 暂停等批准 `npm` → 发布到 npm → 创建 GitHub Release（预发布版本会自动标记为 pre-release）。**任何一项核对不通过，什么都不会发布。**
+10. 流水线 `release.yml` 依次：核对版本、标签、校验和 → 跑全部测试 → 构建一次 → 暂停等批准 `pypi` → 发布到 PyPI → 创建 GitHub Release（预发布版本会自动标记为 pre-release）。**任何一项核对不通过，什么都不会发布。**
+    npm 不随标签发布：PyPI 上线后，在 Actions 页面运行 `release` 工作流，`target` 选 `npm`，批准 `npm` 环境（启动器固定的 PyPI 版本必须已存在，流水线会先检查）。
 
 ## 发布后
 
