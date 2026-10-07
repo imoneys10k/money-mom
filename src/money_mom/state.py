@@ -113,6 +113,15 @@ class LedgerState:
             if acct == account
         }
 
+    def live_import_hashes(self) -> dict[str, str]:
+        """import_hash -> id of the live (not voided) transaction that carries it."""
+        out: dict[str, str] = {}
+        for digest, ids in self._import_index.items():
+            live = [i for i in ids if self.txns[i].status != "voided"]
+            if live:
+                out[digest] = live[0]
+        return out
+
     def currencies_in_use(self) -> set[str]:
         """Every currency the ledger has seen: in entries (posted, pending or voided) and in accounts."""
         used = {p.ccy for rec in self.txns.values() for p in rec.postings}

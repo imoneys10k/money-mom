@@ -25,6 +25,9 @@ from .doctor import run_doctor
 from .errors import LedgerError
 from .events import ROOTS
 from .intents import SPECS, postings_with_slots, record_exchange, record_intent, resolve_account
+from .importing import (
+    add_rule, inspect_statement, list_mappings, load_mapping, recheck, run_import, save_mapping,
+)
 from .ledger import TONES, Ledger
 from .rates import convert_balances, fetch_frankfurter, update_rates
 from .templates import TEMPLATES, apply_template
@@ -405,6 +408,85 @@ def cmd_currency(args: argparse.Namespace) -> tuple[Any, str]:
     return data, text
 
 
+def _import_text(data: dict[str, Any]) -> str:
+    verb = "Would import" if data["dry_run"] else "Imported"
+    lines = [
+        f"{verb} {data['imported']} of {data['rows_read']} rows from {data['file']} into {data['account']} "
+        f"({data['ccy']}), mapping {data['mapping']!r}:",
+        f"  posted {data['posted']}, pending {data['pending']}"
+        + (" (all held: the confidence is below the auto-post threshold)" if data["held_for_confidence"] else
+           " (no rule matched yet)" if data["pending"] else ""),
+    ]
+    skipped = []
+    if data["duplicates_skipped"]:
+        skipped.append(f"{data['duplicates_skipped']} already imported")
+    if data["out_of_range"]:
+        skipped.append(f"{data['out_of_range']} outside --since/--until")
+    skipped += [f"{n} {why}" for why, n in data["ignored"].items()]
+    if skipped:
+        lines.append("  not imported: " + ", ".join(skipped))
+    lines += [f"    e.g. {example}" for example in data["ignored_examples"]]
+    if data["unresolved_payees"]:
+        lines.append("  Ask the user a category for these payees; each answer becomes a rule:")
+        lines += [f"    {u['payee']}  x{u['count']}  ({u['total']})" for u in data["unresolved_payees"][:10]]
+        lines.append(f"  then `money-mom import rule-add --map {data['mapping']} --match TEXT --account ACCOUNT` and `money-mom import recheck --map {data['mapping']}`.")
+    return "\n".join(lines)
+
+
+def cmd_import(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    action = args.import_command
+    if action == "inspect":
+        info = inspect_statement(Path(args.file).expanduser(), encoding=args.encoding)
+        suggested = info["suggested"]
+        lines = [
+            f"{info['file']}: {info['rows']} data rows, encoding {info['encoding']}, delimiter {info['delimiter']!r}, "
+            f"header on line {info['header_line']} ({info['preamble_lines']} lines before it)",
+            "columns: " + " | ".join(info["columns_in_file"]),
+        ]
+        for role, name in suggested["columns"].items():
+            lines.append(f"  looks like {role}: {name}")
+        lines.append(f"  date format: {suggested['date_format'] or 'unclear'}   sign: {suggested['sign'] or 'unclear'}")
+        lines += [f"  note: {n}" for n in info["notes"]]
+        rows = info["sample_rows"]
+        if rows:
+            lines.append(_table(list(rows[0]), [list(r.values()) for r in rows]))
+        lines.append("This is a suggestion to check with the user. Save the mapping with `money-mom import save-map NAME FILE`.")
+        return info, "\n".join(lines)
+    if action == "save-map":
+        text = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+        path = save_mapping(ledger, args.name, text)
+        return {"name": args.name, "path": str(path)}, f"Saved mapping {args.name!r}"
+    if action == "maps":
+        names = list_mappings(ledger)
+        return names, "\n".join(names) if names else "No mappings saved yet."
+    if action == "run":
+        mapping = load_mapping(ledger, args.map)
+        data = run_import(
+            ledger, Path(args.file).expanduser(), mapping, account=args.account,
+            since=dt.date.fromisoformat(args.since) if args.since else None,
+            until=dt.date.fromisoformat(args.until) if args.until else None,
+            actor=_actor(args), confidence=args.confidence, encoding=args.encoding, dry_run=args.dry_run,
+        )
+        return data, _import_text(data)
+    if action == "rule-add":
+        if bool(args.account) == bool(args.skip):
+            raise UsageError("give exactly one of --account or --skip")
+        label = add_rule(ledger, args.map, match=args.match, account=args.account, field_name=args.field, regex=args.regex)
+        return {"mapping": args.map, "rule": label}, f"Added {label} to {args.map!r}: {args.match!r} -> {args.account or 'skip'}"
+    if action == "rule-list":
+        mapping = load_mapping(ledger, args.map)
+        rules = [{"match": r.text, "field": r.field, "regex": r.regex, "account": r.account, "skip": r.account is None}
+                 for r in mapping.rules]
+        rows = [[str(i + 1), r["match"], r["field"], "regex" if r["regex"] else "text", r["account"] or "(skip)"] for i, r in enumerate(rules)]
+        return rules, _table(["#", "match", "field", "kind", "account"], rows) if rows else "No rules yet."
+    data = recheck(ledger, args.map, actor=_actor(args), dry_run=args.dry_run)
+    text = f"{'Would resolve' if data['dry_run'] else 'Resolved'} {data['resolved']} pending row(s) with the rules of {data['mapping']!r}."
+    if data["still_pending"]:
+        text += "\n  Still waiting: " + ", ".join(f"{u['payee']} x{u['count']}" for u in data["still_pending"][:10])
+    return data, text
+
+
 def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     problems = ledger.check()
@@ -747,6 +829,37 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ccy", help="a currency given explicitly: a code such as USD, or a word such as 美元")
     p.add_argument("--account", action="append", help="an account involved; the currencies it allows narrow the choice (repeatable)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
+    p = command("import", cmd_import, "bank and wallet statements: inspect a file, import it with a mapping, teach it rules")
+    isub = p.add_subparsers(dest="import_command", required=True, metavar="ACTION")
+    q = isub.add_parser("inspect", parents=[common], help="look at a statement file and suggest a mapping (nothing is written)")
+    q.add_argument("file")
+    q.add_argument("--encoding", help="force an encoding (default: utf-8, then gb18030)")
+    q = isub.add_parser("save-map", parents=[common], help="validate a mapping (TOML) and save it under the ledger's imports folder")
+    q.add_argument("name")
+    q.add_argument("file", help="the mapping file, or - for stdin")
+    isub.add_parser("maps", parents=[common], help="list saved mappings")
+    q = isub.add_parser("run", parents=[common], help="import a statement: rule-matched rows are posted, the rest wait as pending")
+    q.add_argument("file")
+    q.add_argument("--map", required=True, help="saved mapping name, or a path to a .toml file")
+    q.add_argument("--account", required=True, help="the account the statement belongs to, e.g. 支付宝 or Assets:招行卡")
+    q.add_argument("--since", metavar="DATE", help="skip rows before this date")
+    q.add_argument("--until", metavar="DATE", help="skip rows after this date")
+    q.add_argument("--confidence", type=float, help="0 to 1; an agent must say how sure it is the mapping reads this file correctly")
+    q.add_argument("--encoding")
+    q.add_argument("--dry-run", action="store_true", help="show what would happen, write nothing")
+    q = isub.add_parser("rule-add", parents=[common], help="teach a mapping: rows matching TEXT go to ACCOUNT (or are skipped)")
+    q.add_argument("--map", required=True)
+    q.add_argument("--match", required=True, help="text to look for (case-insensitive), or a regular expression with --regex")
+    q.add_argument("--account", help="the counter account, e.g. 外卖 or Expenses:餐饮:外卖")
+    q.add_argument("--skip", action="store_true", help="skip these rows instead (for example a transfer you import from the other side)")
+    q.add_argument("--field", choices=("any", "payee", "description"), default="any")
+    q.add_argument("--regex", action="store_true")
+    q = isub.add_parser("rule-list", parents=[common], help="list the rules of a mapping")
+    q.add_argument("--map", required=True)
+    q = isub.add_parser("recheck", parents=[common], help="after adding rules, confirm the pending rows that now match")
+    q.add_argument("--map", required=True)
+    q.add_argument("--dry-run", action="store_true")
+
     command("doctor", cmd_doctor, "check the install and the ledger; a missing ledger is not an error")
     command("check", cmd_check, "replay the whole ledger and re-verify every assertion")
 
