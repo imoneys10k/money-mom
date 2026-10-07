@@ -63,7 +63,7 @@ def _toml_str(value: str) -> str:
 
 @contextlib.contextmanager
 def _exclusive_lock(path: Path) -> Iterator[None]:
-    """Cross-process advisory lock (flock on POSIX, msvcrt on Windows; Windows is untested)."""
+    """Cross-process advisory lock (flock on POSIX, msvcrt on Windows; both run in CI)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a+b") as handle:
         if os.name == "nt":  # pragma: no cover
