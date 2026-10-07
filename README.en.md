@@ -99,6 +99,7 @@ money-mom confirm <ID> --category restaurants      # fill it in by name, then it
 money-mom balance                                  # exact balances
 money-mom report --month 2026-09                   # monthly report: income, spending by category, vs last month, net worth
 money-mom chart                                    # a one-page chart sheet (HTML)
+money-mom alerts                                   # recurring charges and anomaly alerts
 money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
@@ -141,6 +142,18 @@ money-mom chart --hide-amounts                      # shares and shapes only, wi
 - **Charts only draw figures the report already computed.** Conversion follows the same rules; a currency with no rate is marked on the chart, and a month with no data is a gap, never a zero bar.
 - **Just static files:** no script, no web font, no external resource, no network; they open offline. `--format json` gives an agent the figures behind a chart so it can draw its own.
 
+## Subscriptions and anomaly alerts
+
+```bash
+money-mom alerts                    # this month so far: recurring charges and what is worth a look
+money-mom alerts --month 2026-09
+```
+
+- **Recurring charges:** the same payee and currency charged at a steady interval: weekly (at least 4 charges), monthly (at least 3) or yearly (at least 2). Each shows whether the amount is fixed, the last and next expected dates, and the cost per month.
+- **Only five kinds of alert, each with its evidence and rule:** a price change (an amount that was always the same is not), an overdue charge (it may be cancelled or paid another way; the program cannot tell), an unusually large expense, a sudden jump in a category, and a possible duplicate charge (same payee and amount twice within two days). Every alert carries the entry IDs, so it can be checked one by one with `show`, and the rules are returned with the result.
+- **Not enough evidence, no alert.** Less than three months of records, or entries without a payee, are never forced into a subscription or an anomaly; the result says why. Payees are matched exactly after case and spacing are normalised, never fuzzily.
+- **It only points things out.** Nothing is decided for you, nothing is sent, and the network is not used: whether to cancel a subscription, or whether a charge was doubled, is up to you.
+
 ## Many currencies
 
 You are not tied to one currency:
@@ -172,8 +185,8 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · monthly report and charts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | Subscription and anomaly alerts · "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
+| Done | Ledger core · command line · SQLite queries · monthly report and charts · subscriptions and anomaly alerts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Next | "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
 | Later | PyPI / npm · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.

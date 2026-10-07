@@ -147,6 +147,18 @@ money-mom report --month 2026-09 --in USD --json
 - Moving money between your own accounts and exchanging currencies are not income or spending, so they are not in the report; if the user expects one there, explain that.
 - Converted at the rate of the last day of the month (today for the current month), from stored rates only. This command never uses the network; offer `rates update` if rates are missing.
 
+### Subscriptions and alerts
+
+```bash
+money-mom alerts --json                   # this month so far
+money-mom alerts --month 2026-09 --json
+```
+
+- Run it when the user asks about subscriptions, recurring charges, "anything odd", or when you give a monthly review. Present `data.alerts` (each has a `summary`) and `data.subscriptions`; do not re-derive them.
+- **Alerts are questions, not verdicts.** `overdue` may mean cancelled, paid another way, or not recorded yet; `possible_duplicate` may be two real purchases; `large_expense` may be planned. Say what was found, show the entries (`money-mom show ID`), and let the user decide. Never cancel, dispute or "fix" anything on their behalf, and never describe an alert as proof of fraud.
+- Read `data.notes`: with under three months of history, or entries without a payee, nothing can be recognised. Say that, rather than "no subscriptions". Recurring charges are matched by payee, so suggest adding payees (imports usually have them).
+- `subscription_total.per_month` is an estimate when `varying > 0` (some amounts change) and is `partial` when a currency has no rate.
+
 ### Charts
 
 ```bash

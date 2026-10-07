@@ -32,6 +32,7 @@ from .ledger import TONES, Ledger
 from .rates import convert_balances, fetch_frankfurter, update_rates
 from .reconcile import reconcile, rows_from_json, seal
 from .charts import FORMATS, KINDS, LANGS, chart_data, render
+from .alerts import find_alerts
 from .report import monthly_report, monthly_series
 from .templates import TEMPLATES, apply_template
 
@@ -719,6 +720,39 @@ def cmd_report(args: argparse.Namespace) -> tuple[Any, str]:
     return result, _report_text(result)
 
 
+def _alerts_text(r: dict[str, Any]) -> str:
+    lines = [f"Subscriptions and anomalies, {r['month']} (as of {r['as_of']}), in {r['in']}", ""]
+    subs = r["subscriptions"]
+    if subs:
+        lines.append("Recurring charges")
+        rows = [[s["payee"], s["cadence"], s["latest"], s["ccy"], "fixed" if s["amount_is_steady"] else "varies",
+                 s["last_date"], s["next_expected"], s["status"] + (f" ({s['days_late']}d)" if s["status"] == "overdue" else "")]
+                for s in subs]
+        lines.append(_table(["payee", "every", "latest", "ccy", "amount", "last", "next", "status"], rows))
+        total = r["subscription_total"]
+        lines.append(f"About {total['per_month']} {r['in']} a month across {total['count']} active"
+                     + (" (PARTIAL: missing " + ", ".join(total["missing"]) + ")" if total["partial"] else "")
+                     + (f"; {total['varying']} of them vary in amount, so that is an estimate" if total["varying"] else ""))
+    else:
+        lines.append("No recurring charges recognised.")
+    lines += ["", "Worth a look" if r["alerts"] else "Nothing stands out this month."]
+    lines += [f"  [{a['type']}] {a['summary']}" for a in r["alerts"]]
+    lines += [""] + [f"Note: {n}" for n in r["notes"]]
+    return "\n".join(lines).rstrip()
+
+
+def cmd_alerts(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    target = None
+    if args.target_ccy:
+        named = parse_currency(args.target_ccy)
+        if len(named) != 1:
+            raise UsageError(f"--in needs one currency, such as CNY or 人民币; got {args.target_ccy!r}")
+        target = named[0]
+    result = find_alerts(ledger, args.month, target=target)
+    return result, _alerts_text(result)
+
+
 def cmd_chart(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     target = None
@@ -1069,6 +1103,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--month", metavar="YYYY-MM", help="default: the current month (month to date)")
     p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the totals (default: the ledger's base currency)")
     p.add_argument("--top", type=int, default=5, help="how many of the biggest items to list (default 5)")
+
+    p = command("alerts", cmd_alerts, "recurring charges (subscriptions) and things worth a look: price changes, overdue or doubled charges, unusually large or sudden spending")
+    p.add_argument("--month", metavar="YYYY-MM", help="default: the current month (up to today)")
+    p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the monthly total (default: the ledger's base currency)")
 
     p = command("chart", cmd_chart, "draw charts for a month: an HTML sheet (default) or one chart as SVG; amounts can be hidden for sharing")
     p.add_argument("kind", nargs="?", default="sheet", choices=KINDS, help="sheet (all charts on one page, default), spending, change, trend, networth, waterfall")
