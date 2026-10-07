@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,3 +32,46 @@ jobs:
         run: uvx --from "git+https://github.com/agentskills/agentskills@69ef37e9424c0a7ea9dd2293b559e43ec8176379#subdirectory=skills-ref" skills-ref validate skills/money-mom
       - name: no unfilled placeholders in the docs
         run: "! grep -rnI '{{' INSTALL.md README.md README.en.md skills site"
+
+  npm:
+    name: npm launcher (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "20", "22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: cd npm && node --test
+      - name: the package contains only what it should
+        run: |
+          cd npm && npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync("/tmp/pack.json"))[0].files.map(f => f.path).sort();
+            const want = ["LICENSE", "README.md", "bin/money-mom.js", "package.json"];
+            if (JSON.stringify(files) !== JSON.stringify(want)) { console.error("unexpected files:", files); process.exit(1); }
+          '
+
+  packages:
+    name: the built packages work on their own
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uvx twine check dist/*
+      - name: the wheel installs and runs
+        run: |
+          uv venv --python 3.12 /tmp/wheel-venv
+          uv pip install --quiet --python /tmp/wheel-venv/bin/python dist/*.whl
+          /tmp/wheel-venv/bin/money-mom --version
+          /tmp/wheel-venv/bin/money-mom doctor
+      - name: the source distribution builds a wheel and passes its own tests
+        run: |
+          mkdir /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist
+          uv venv --python 3.12 /tmp/sdist-venv
+          uv pip install --quiet --python /tmp/sdist-venv/bin/python /tmp/sdist/money_mom-*
+          cd /tmp/sdist/money_mom-* && /tmp/sdist-venv/bin/python -m unittest discover -s tests

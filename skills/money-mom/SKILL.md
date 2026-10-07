@@ -5,7 +5,7 @@ license: MIT
 compatibility: Needs the money-mom command (Python 3.11+, installed with uv). All data stays on the user's computer. Installation steps are in INSTALL.md of https://github.com/imoneys10k/money-mom
 metadata:
   author: imoneys10k
-  version: "0.1.0a2"
+  version: "0.1.0a3"
 ---
 
 # Money Mom

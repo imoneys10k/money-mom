@@ -1,27 +1,51 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "money-mom"
-version = "0.1.0a2"
-description = "Money Mom: an append-only, double-entry ledger engine for AI agents."
-readme = "README.md"
-license = { text = "MIT" }
+version = "0.1.0a3"
+description = "Money Mom: an append-only, double-entry ledger engine and skill for AI agents. Local-first, never guesses."
+readme = "README.pypi.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
+authors = [{ name = "Money Mom contributors" }]
+keywords = [
+  "accounting", "bookkeeping", "double-entry", "personal-finance", "ledger",
+  "ai-agent", "agent-skill", "local-first", "mcp", "cli",
+]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
-  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Office/Business :: Financial :: Accounting",
+  "Typing :: Typed",
 ]
 
 [project.scripts]
 money-mom = "money_mom.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/imoneys10k/money-mom"
+Homepage = "https://imoneys10k.github.io/money-mom/"
+Repository = "https://github.com/imoneys10k/money-mom"
+Issues = "https://github.com/imoneys10k/money-mom/issues"
+Changelog = "https://github.com/imoneys10k/money-mom/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/imoneys10k/money-mom/blob/main/README.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/money_mom"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src", "/tests", "/skills", "/README.md", "/README.en.md", "/README.pypi.md", "/INSTALL.md",
+  "/CHANGELOG.md", "/LICENSE", "/AGENTS.md",
+]

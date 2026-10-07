@@ -37,15 +37,15 @@
 - [x] 仓库布局：`skills/money-mom/SKILL.md`，CI 里用 `skills-ref validate` 校验
 - [x] `INSTALL.md`：写给 agent 读的安装说明（校验 SHA-256），README 里放“一句话安装”提示词
 - [x] 通用安装器 `npx skills add` 已在隔离环境验证：文件放到 `~/.agents/skills`，Claude Code 软链接过去；**各 agent 内的对话效果尚未逐一实测**
-- [ ] 发布 PyPI 包 `money-mom`（引擎），skill 锁定版本调用 `uvx money-mom==x.y.z`
-- [ ] 发布 npm 包 `money-mom`（轻量启动器，找到或安装 `uv` 后调用引擎）
+- [ ] 发布 PyPI 包 `money-mom`（引擎），skill 锁定版本调用 `uvx money-mom==x.y.z`：**已准备好**（元数据、专用说明、`twine check`、可信发布流水线、人工批准关卡、sdist 自测），**等待账号登记与批准后发布**，步骤见 [docs/publishing.md](docs/publishing.md)
+- [ ] 发布 npm 包 `money-mom`（轻量启动器，通过 uv 运行同版本的引擎，不自动安装任何东西）：**已写好并测试**（8 个单元测试、10 个变异测试、用真实 uvx 的端到端演练），等待 PyPI 发布后发布
 - [ ] `money-mom init`：创建账本目录（仓库之外）
 - [x] `money-mom doctor`：自检环境、版本、账本目录与权限
 - [ ] Claude Code 插件市场入口（`.claude-plugin/marketplace.json`）
 - [ ] 逐个 agent 实测：Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot
 - [ ] 为不支持 skill 的 agent 提供 `AGENTS.md` 兜底说明
 - [x] GitHub Actions：Linux / macOS / Windows × Python 3.11–3.13 的测试
-- [ ] GitHub Actions：打包与发布
+- [x] GitHub Actions：打包与发布（`release.yml`：核对版本/标签/校验和，构建一次，PyPI 可信发布，npm 来源证明，GitHub Release；`pypi`、`npm`、`testpypi` 环境都需要人批准）；CI 还检查 wheel、sdist 与 npm 包的内容
 - [x] Release 流程文档 [docs/releasing.md](docs/releasing.md)；首个预发布 `v0.1.0a1`（wheel 附在 Release 上）
 - [x] 项目主页（GitHub Pages，中文默认，可切英文）与中英文 README
 

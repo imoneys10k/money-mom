@@ -1,0 +1,190 @@
+name: release
+
+# Publishing is irreversible (a version number can never be uploaded twice), so this workflow:
+#   - builds ONCE and publishes exactly those files everywhere;
+#   - refuses to publish if the tag, the versions or the checksum in INSTALL.md disagree;
+#   - waits for a human to approve each registry (the `pypi` and `npm` environments have required reviewers);
+#   - uses Trusted Publishing (OIDC) for PyPI, so no PyPI password or token is stored anywhere.
+#
+# A tag `vX.Y.Z...` publishes to PyPI, then npm, then creates the GitHub release.
+# Run it by hand to rehearse: "build-only" checks everything and publishes nothing; "testpypi" uploads to TestPyPI.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "build-only: verify and build, publish nothing. testpypi: also upload to TestPyPI."
+        type: choice
+        options: [build-only, testpypi]
+        default: build-only
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: verify and build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      sha256: ${{ steps.meta.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: versions must agree with each other and with the tag
+        id: meta
+        run: |
+          VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          INIT=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/money_mom/__init__.py)
+          NPM=$(node -p 'require("./npm/package.json").moneyMomVersion')
+          [ "$INIT" = "$VERSION" ] || { echo "::error::__init__.py says $INIT but pyproject says $VERSION"; exit 1; }
+          [ "$NPM" = "$VERSION" ] || { echo "::error::npm/package.json pins $NPM but pyproject says $VERSION"; exit 1; }
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$VERSION" ]; then
+            echo "::error::the tag is ${GITHUB_REF_NAME} but the version is $VERSION"; exit 1
+          fi
+          test -f "docs/release-notes/v$VERSION.md" || { echo "::error::missing docs/release-notes/v$VERSION.md"; exit 1; }
+
+      - name: tests
+        run: |
+          uv run --python 3.12 --no-project python -m unittest discover -s tests
+        env:
+          PYTHONPATH: src:tests
+      - name: npm launcher tests
+        run: cd npm && node --test
+
+      - name: build the Python package once
+        run: |
+          uv build
+          uvx twine check dist/*
+
+      - name: build the npm package once
+        run: cd npm && npm pack --pack-destination ../npm-dist
+
+      - name: the checksum published in INSTALL.md must be this wheel
+        id: sum
+        run: |
+          SHA=$(sha256sum dist/*.whl | cut -d' ' -f1)
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "wheel sha256: $SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -q "$SHA" INSTALL.md || { echo "::error::INSTALL.md does not list $SHA; rebuild locally and update it before tagging"; exit 1; }
+          grep -q "$SHA" "docs/release-notes/v${{ steps.meta.outputs.version }}.md" || { echo "::error::the release notes do not list $SHA"; exit 1; }
+
+      - name: the built wheel runs
+        run: |
+          uv venv --python 3.12 /tmp/check
+          uv pip install --quiet --python /tmp/check/bin/python dist/*.whl
+          /tmp/check/bin/money-mom --version
+          /tmp/check/bin/money-mom doctor
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-dist
+          path: npm-dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: rehearsal upload to TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/money-mom
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/money-mom
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-npm:
+    name: publish to npm
+    needs: [build, publish-pypi]  # the launcher pins a PyPI version, so that version must already exist
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/money-mom
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-dist
+          path: npm-dist/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: npm 11.5.1 or newer is needed for trusted publishing and provenance
+        run: npm install -g "npm@^11.5.1" && npm --version
+      - name: publish the tarball that was built above
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # The first publish of a new package needs a token. Once npm Trusted Publishing is configured for the
+          # package, delete the NPM_TOKEN secret and this step publishes with OIDC alone.
+          if [ -n "$NPM_TOKEN" ]; then
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+          fi
+          npm publish npm-dist/*.tgz --provenance --access public
+
+  github-release:
+    name: GitHub release
+    needs: [build, publish-pypi]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - name: create the release from the notes in the repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          FLAG=""
+          case "$VERSION" in *a[0-9]*|*b[0-9]*|*rc[0-9]*) FLAG="--prerelease";; esac
+          gh release create "$GITHUB_REF_NAME" dist/*.whl dist/*.tar.gz \
+            $FLAG --verify-tag --title "$GITHUB_REF_NAME" --notes-file "docs/release-notes/$GITHUB_REF_NAME.md"

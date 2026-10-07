@@ -12,6 +12,8 @@ from money_mom.importing import parse_mapping
 from test_cli import CliTestCase
 
 ROOT = Path(__file__).resolve().parent.parent
+FULL_CHECKOUT = (ROOT / "site" / "index.html").is_file() and (ROOT / "npm" / "package.json").is_file()
+full_checkout_only = unittest.skipUnless(FULL_CHECKOUT, "needs the whole repository, not just a source distribution")
 DOCS = [
     ROOT / "skills/money-mom/SKILL.md",
     ROOT / "skills/money-mom/references/commands.md",
@@ -116,16 +118,49 @@ class Consistency(unittest.TestCase):
         for code in re.findall(r"`([a-z_]+)`", "\n".join(l.split("|")[1] for l in table.splitlines() if l.startswith("| `"))):
             self.assertRegex(source, rf"[\"']{code}[\"']", f"SKILL.md documents the code {code!r} but no code raises it")
 
+    @full_checkout_only
     def test_the_version_is_the_same_everywhere(self):
         from money_mom import __version__
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn(f'version = "{__version__}"', pyproject)
         self.assertIn(f'version: "{__version__}"', (ROOT / "skills/money-mom/SKILL.md").read_text(encoding="utf-8"))
         self.assertIn(f"money_mom-{__version__}-py3-none-any.whl", (ROOT / "INSTALL.md").read_text(encoding="utf-8"))
-        for name in ("INSTALL.md", "README.md", "README.en.md", "site/index.html"):
+        for name in ("INSTALL.md", "README.md", "README.en.md", "README.pypi.md", "npm/README.md", "site/index.html"):
             text = (ROOT / name).read_text(encoding="utf-8")
             stray = {v for v in re.findall(r"\b0\.\d+\.\d+(?:a|b|rc)\d+\b", text) if v != __version__}
             self.assertEqual(stray, set(), f"{name} still mentions another pre-release version")
+
+
+@full_checkout_only
+class Packaging(unittest.TestCase):
+    def test_the_npm_package_pins_this_exact_engine(self):
+        from money_mom import __version__
+        pkg = json.loads((ROOT / "npm/package.json").read_text(encoding="utf-8"))
+        self.assertEqual(pkg["moneyMomVersion"], __version__)
+        match = re.fullmatch(r"(\d+\.\d+\.\d+)-(alpha|beta|rc)\.(\d+)", pkg["version"])
+        self.assertIsNotNone(match, "an npm pre-release looks like 0.1.0-alpha.3")
+        letter = {"alpha": "a", "beta": "b", "rc": "rc"}[match.group(2)]
+        self.assertEqual(f"{match.group(1)}{letter}{match.group(3)}", __version__)
+
+    def test_the_pypi_description_renders_on_pypi(self):
+        from money_mom import __version__
+        text = (ROOT / "README.pypi.md").read_text(encoding="utf-8")
+        self.assertNotRegex(text, r"<(picture|img|p |div)", "PyPI strips raw HTML")
+        self.assertEqual(re.findall(r"\]\((?!https?://)[^)]*\)", text), [], "every link on PyPI must be absolute")
+        self.assertIn(f'"money-mom=={__version__}"', text)
+        self.assertEqual(re.findall(r"\]\((?!https?://)[^)]*\)", (ROOT / "npm/README.md").read_text(encoding="utf-8")), [])
+
+    def test_there_are_release_notes_for_this_version(self):
+        from money_mom import __version__
+        notes = ROOT / "docs/release-notes" / f"v{__version__}.md"
+        self.assertTrue(notes.is_file(), f"the release workflow publishes {notes.name}")
+        text = notes.read_text(encoding="utf-8")
+        self.assertIn(f"money_mom-{__version__}-py3-none-any.whl", text)
+        self.assertFalse("__WHEEL_SHA256__" in text, "the checksum must be filled in before releasing")
+
+    def test_the_license_is_in_every_package(self):
+        for path in ("LICENSE", "npm/LICENSE"):
+            self.assertEqual((ROOT / path).read_text(encoding="utf-8"), (ROOT / "LICENSE").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
