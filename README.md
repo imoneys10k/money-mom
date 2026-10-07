@@ -98,6 +98,7 @@ money-mom pending                                  # 看有什么等你确认
 money-mom confirm <ID> --category 餐饮:聚餐         # 按名字补全，再入账
 money-mom balance                                  # 精确到分的余额
 money-mom report --month 2026-09                   # 月报：收支、分类、和上月对比、净资产变化
+money-mom chart                                    # 一页图表简报（HTML）
 money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # 自检
 ```
@@ -122,6 +123,23 @@ money-mom reconcile 银行卡 招行9月.csv --map cmb --closing-from-statement 
 - **重复导入是安全的。** 每行有稳定的哈希，已经在账本里的行会被跳过；整批全有或全无，被拒绝的行会按账单行号指出。
 - **问一次，学一次。** 没有规则命中的行记为待确认，并按对方分组；回答一次写成规则，`recheck` 把等着的历史行一并补全。
 - **对账找出漏记、多记、金额不符，以及可能被扣了两次的款项**，并核对期末余额；只有完全对上才允许封存。PDF 账单由 agent 读取后以 JSON 提交，程序本身不解析 PDF。
+
+## 月报与图表
+
+```bash
+money-mom report --month 2026-09                    # 月报：收支、分类、和上月对比、净资产变化
+money-mom chart --month 2026-09                     # 一页图表简报（HTML），写进账本目录的 charts/
+money-mom chart spending --format svg --lang en     # 单张图，SVG
+money-mom chart --hide-amounts                      # 只画比例与形状，没有任何金额，可以放心分享
+```
+
+<p align="center"><img src="assets/charts-zh.png" alt="月度财务简报示例：支出构成、环比变化、收支趋势、净资产、从收入到结余" width="860"></p>
+
+*上图用合成的演示数据生成。*
+
+- **风格取自投研报告：** 深海军蓝配钢蓝灰，只用一个琥珀色强调，涨跌用沉稳的红绿；只画水平细网格，等宽数字；标题直接写结论，每张图下有来源，并附可展开的数据表。支出增加用红色加 ▲，减少用绿色加 ▼，不只靠颜色区分。自动跟随系统深色模式，也能直接打印。
+- **图只画月报已经算好的数字。** 折算规则与月报完全一致；缺汇率的币种明确标注，没有数据的月份是空缺，不画成 0。
+- **只是几个静态文件：** 不含脚本、不加载字体或任何外部资源、不联网，离线也能打开。`--format json` 给 agent 图背后的数字，让它自己画。
 
 ## 多币种
 
@@ -154,8 +172,8 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 | | |
 |---|---|
-| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
-| 下一步 | 图表输出 · 订阅与异常提醒 · “妈妈”语气档位 · 微信账单的内置预设（需要真实导出样本） |
+| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报与图表 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
+| 下一步 | 订阅与异常提醒 · “妈妈”语气档位 · 微信账单的内置预设（需要真实导出样本） |
 | 之后 | 发布到 PyPI / npm · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
 
 不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。

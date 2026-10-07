@@ -147,6 +147,20 @@ money-mom report --month 2026-09 --in USD --json
 - Moving money between your own accounts and exchanging currencies are not income or spending, so they are not in the report; if the user expects one there, explain that.
 - Converted at the rate of the last day of the month (today for the current month), from stored rates only. This command never uses the network; offer `rates update` if rates are missing.
 
+### Charts
+
+```bash
+money-mom chart --month 2026-09 --json                    # one HTML page with every chart; the path is in data.path
+money-mom chart spending --format svg --lang en --json    # one chart as SVG
+money-mom chart --hide-amounts --json                     # shares and shapes only, no amounts anywhere
+money-mom chart trend --format json                       # only the figures, to draw your own
+```
+
+- Charts draw the figures `report` computes, with the same rules; do not recompute or restyle them. Tell the user where the file is (`data.path`) and offer to open it; do not paste its contents.
+- **If the user wants to share a chart, offer `--hide-amounts` first.** It redraws a version without a single amount. Do not describe the normal version as safe to share: it holds exact figures and a data table.
+- `data.partial` is true when a currency had no rate: the chart marks it and leaves it out. Say so, and offer `rates update`. Months with no entries are gaps, not zero: do not say spending was zero.
+- The files are static: no script, no network, nothing external. The default folder is `<ledger>/charts/`; an existing `--out` file is only replaced with `--force`.
+
 ### Totals across currencies
 
 ```bash

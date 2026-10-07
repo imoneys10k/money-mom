@@ -31,7 +31,8 @@ from .importing import (
 from .ledger import TONES, Ledger
 from .rates import convert_balances, fetch_frankfurter, update_rates
 from .reconcile import reconcile, rows_from_json, seal
-from .report import monthly_report
+from .charts import FORMATS, KINDS, LANGS, chart_data, render
+from .report import monthly_report, monthly_series
 from .templates import TEMPLATES, apply_template
 
 DEFAULT_HOME = "~/MoneyMom"
@@ -718,6 +719,47 @@ def cmd_report(args: argparse.Namespace) -> tuple[Any, str]:
     return result, _report_text(result)
 
 
+def cmd_chart(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    target = None
+    if args.target_ccy:
+        named = parse_currency(args.target_ccy)
+        if len(named) != 1:
+            raise UsageError(f"--in needs one currency, such as CNY or 人民币; got {args.target_ccy!r}")
+        target = named[0]
+    if not 1 <= args.months <= 60:
+        raise UsageError("--months must be between 1 and 60")
+    report = monthly_report(ledger, args.month, target=target)
+    series = monthly_series(ledger, args.months, end=report["month"], target=target)
+    if args.format == "json":
+        figures = chart_data(args.kind, report, series)
+        return figures, json.dumps(figures, ensure_ascii=False, indent=2, default=str)
+    document = render(
+        args.kind, report, series, lang=args.lang, hide=args.hide_amounts, fmt=args.format, generated=dt.date.today(),
+    )
+    if args.out == "-":
+        return {"kind": args.kind, "format": args.format, "month": report["month"], "content": document}, document
+    if args.out:
+        path = Path(args.out).expanduser()
+        if path.exists() and not args.force:
+            raise UsageError(f"{path} already exists; choose another --out or add --force")
+    else:
+        private = "-private" if args.hide_amounts else ""
+        path = ledger.root / "charts" / f"{args.kind}-{report['month']}{private}.{args.format}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(document, encoding="utf-8")
+    os.replace(tmp, path)
+    data = {
+        "kind": args.kind, "format": args.format, "month": report["month"], "path": str(path), "bytes": len(document.encode("utf-8")),
+        "partial": report["partial"], "missing": report["missing"], "amounts_hidden": bool(args.hide_amounts),
+    }
+    text = f"Wrote {path}" + (" (amounts hidden)" if args.hide_amounts else "")
+    if report["partial"]:
+        text += f"\nNote: no rate for {', '.join(report['missing'])}; those amounts are left out and marked on the chart."
+    return data, text
+
+
 def cmd_rates(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     if args.rates_command == "update":
@@ -1027,6 +1069,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--month", metavar="YYYY-MM", help="default: the current month (month to date)")
     p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the totals (default: the ledger's base currency)")
     p.add_argument("--top", type=int, default=5, help="how many of the biggest items to list (default 5)")
+
+    p = command("chart", cmd_chart, "draw charts for a month: an HTML sheet (default) or one chart as SVG; amounts can be hidden for sharing")
+    p.add_argument("kind", nargs="?", default="sheet", choices=KINDS, help="sheet (all charts on one page, default), spending, change, trend, networth, waterfall")
+    p.add_argument("--month", metavar="YYYY-MM", help="default: the current month (month to date)")
+    p.add_argument("--months", type=int, default=12, help="how many months the trend and net worth charts cover (default 12)")
+    p.add_argument("--in", dest="target_ccy", metavar="CCY", help="currency of the figures (default: the ledger's base currency)")
+    p.add_argument("--lang", choices=LANGS, default="zh", help="language of the labels (default zh)")
+    p.add_argument("--format", choices=FORMATS, default="html", help="html (default), svg (one chart), or json (the figures behind it, nothing written)")
+    p.add_argument("--hide-amounts", action="store_true", help="draw shares and shapes only, with no amounts anywhere, so the picture can be shared")
+    p.add_argument("--out", metavar="PATH", help="where to write it (default: <ledger>/charts/); '-' prints to the terminal")
+    p.add_argument("--force", action="store_true", help="overwrite an existing --out file")
 
     p = command("rates", cmd_rates, "exchange rates: fetch (the only command that uses the network), set, list")
     rates_sub = p.add_subparsers(dest="rates_command", required=True, metavar="ACTION")

@@ -225,7 +225,8 @@ def monthly_report(
     if in_progress:
         notes.append(f"{first:%Y-%m} is not over: figures are month to date ({first} to {as_of}), so comparing them with a full month is unfair.")
     if pending:
-        notes.append(f"{len(pending)} pending entr{'y' if len(pending) == 1 else 'ies'} in this month are not counted until confirmed.")
+        many = len(pending) != 1
+        notes.append(f"{len(pending)} pending {'entries' if many else 'entry'} in this month {'are' if many else 'is'} not counted until confirmed.")
     if cur["missing"]:
         notes.append(f"No exchange rate for {', '.join(cur['missing'])}: left out of the converted figures. Run `money-mom rates update`.")
     if stale:
@@ -259,3 +260,50 @@ def _stale(ledger: Ledger, data: dict[str, Any], target: str, on: _dt.date) -> l
         if info is not None and info.stale:
             out.append(ccy)
     return out
+
+
+def month_before(first: _dt.date, back: int) -> _dt.date:
+    """The first day of the month `back` months before the month starting on `first`."""
+    index = first.year * 12 + first.month - 1 - back
+    return _dt.date(index // 12, index % 12 + 1, 1)
+
+
+def monthly_series(
+    ledger: Ledger, months: int = 12, *, end: str | None = None, target: str | None = None,
+    today: _dt.date | None = None,
+) -> dict[str, Any]:
+    """Income, spending, net and net worth for each of the last `months` months, oldest first.
+
+    Months before the first posted entry are left out. A month with no income or spending has `null` figures
+    (it is not a month of zero). Each month is converted at its own last day (today, for the current month).
+    """
+    if not 1 <= months <= 60:
+        raise LedgerError("months must be between 1 and 60", code="usage_error")
+    ledger.reload()
+    today = today or _dt.date.today()
+    last_first, _ = parse_month(end or f"{today.year:04d}-{today.month:02d}")
+    if last_first > today:
+        raise LedgerError(f"{last_first:%Y-%m} has not started yet", code="usage_error")
+    target = target or ledger.base_currency
+    earliest = min((r.date for r in ledger.state.txns.values() if r.status == "posted"), default=None)
+    rows = []
+    for back in range(months - 1, -1, -1):
+        first = month_before(last_first, back)
+        _, last = parse_month(f"{first:%Y-%m}")
+        if earliest is None or last < earliest:
+            continue
+        as_of = min(last, today)
+        data = _collect(ledger, first, last)
+        summary = _summary(ledger, data, target, as_of)
+        worth = _worth(ledger, as_of, target)
+        has = data["entries"] > 0
+        rows.append({
+            "month": f"{first:%Y-%m}", "as_of": as_of.isoformat(), "in_progress": first <= today <= last,
+            "entries": data["entries"],
+            "income": summary["income"]["total"] if has else None,
+            "expenses": summary["expenses"]["total"] if has else None,
+            "net": summary["net"] if has else None,
+            "partial": summary["partial"] if has else False, "missing": summary["missing"] if has else [],
+            "net_worth": worth["total"], "net_worth_partial": worth["partial"], "net_worth_missing": worth["missing"],
+        })
+    return {"in": target, "months": rows}

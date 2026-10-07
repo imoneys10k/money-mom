@@ -98,6 +98,7 @@ money-mom pending                                  # what is waiting for you
 money-mom confirm <ID> --category restaurants      # fill it in by name, then it posts
 money-mom balance                                  # exact balances
 money-mom report --month 2026-09                   # monthly report: income, spending by category, vs last month, net worth
+money-mom chart                                    # a one-page chart sheet (HTML)
 money-mom query "SELECT month, account, amount FROM v_monthly"
 money-mom doctor                                   # self-check
 ```
@@ -122,6 +123,23 @@ money-mom reconcile checking cmb-sep.csv --map cmb --closing-from-statement --as
 - **Re-importing is safe.** Every row has a stable hash, so rows already in the ledger are skipped; the batch is all-or-nothing, and a refused row is named by its statement line.
 - **Ask once, learn once.** Rows no rule matched are held as pending, grouped by payee; one answer becomes a rule and `recheck` settles the waiting history.
 - **Reconciliation finds missing and extra entries, amounts that disagree and charges that may have been taken twice**, and checks the closing balance; only a fully matching result can be sealed. A PDF statement is read by the agent and handed over as JSON; the program itself does not parse PDFs.
+
+## Monthly report and charts
+
+```bash
+money-mom report --month 2026-09                    # report: income, spending by category, vs last month, net worth
+money-mom chart --month 2026-09                     # a one-page chart sheet (HTML), written to the ledger's charts/ folder
+money-mom chart spending --format svg --lang en     # a single chart as SVG
+money-mom chart --hide-amounts                      # shares and shapes only, with no amounts, safe to share
+```
+
+<p align="center"><img src="assets/charts-en.png" alt="Sample monthly summary: spending mix, change on the month before, income and spending trend, net worth, income to net" width="860"></p>
+
+*Generated from synthetic demo data.*
+
+- **The look of a research note:** deep navy and steel grey with a single amber accent, muted red and green for direction, hairline horizontal gridlines only, tabular figures, headlines that state the finding, a source line under every chart and an expandable data table. Spending up is red with ▲ and down is green with ▼, so colour is never the only signal. It follows the system dark mode and prints cleanly.
+- **Charts only draw figures the report already computed.** Conversion follows the same rules; a currency with no rate is marked on the chart, and a month with no data is a gap, never a zero bar.
+- **Just static files:** no script, no web font, no external resource, no network; they open offline. `--format json` gives an agent the figures behind a chart so it can draw its own.
 
 ## Many currencies
 
@@ -154,8 +172,8 @@ To be straight about it: the installer (`npx skills add`) has been verified in a
 
 | | |
 |---|---|
-| Done | Ledger core · command line · SQLite queries · monthly report · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
-| Next | Chart output · subscription and anomaly alerts · "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
+| Done | Ledger core · command line · SQLite queries · monthly report and charts · intents (spend / income / transfer) · statement import and reconciliation (mappings, rules, dedupe, line-by-line matching, sealing) · many currencies (recognition, rate conversion, exchange) · Chinese and English account templates · skill and install guide · `doctor` · CI on Linux, macOS and Windows |
+| Next | Subscription and anomaly alerts · "Mom" tone levels · a built-in WeChat preset (needs real export samples) |
 | Later | PyPI / npm · Claude Code plugin marketplace · Beancount export · investor pack (HK/US holdings with cost basis, realised and unrealised gains) |
 
 What it will not do: move money or place orders, store bank credentials, or do more than read-only import of bank and broker data.
