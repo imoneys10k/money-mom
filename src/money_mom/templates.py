@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 _CN_ACCOUNTS = """
 Assets:现金 Assets:支付宝 Assets:微信 Assets:银行卡 Assets:应收
 Liabilities:信用卡 Liabilities:花呗
-Equity:期初余额 Equity:调整
+Equity:期初余额 Equity:调整 Equity:汇兑
 Income:工资 Income:奖金 Income:利息 Income:其他收入
 Expenses:餐饮 Expenses:餐饮:早餐 Expenses:餐饮:午餐 Expenses:餐饮:晚餐
 Expenses:餐饮:咖啡 Expenses:餐饮:外卖 Expenses:餐饮:聚餐
@@ -30,7 +30,7 @@ Expenses:其他支出
 _EN_ACCOUNTS = """
 Assets:Cash Assets:Checking Assets:Savings Assets:Receivable
 Liabilities:CreditCard
-Equity:Opening-Balances Equity:Adjustments
+Equity:Opening-Balances Equity:Adjustments Equity:Conversions
 Income:Salary Income:Bonus Income:Interest Income:Other
 Expenses:Food Expenses:Food:Groceries Expenses:Food:Restaurants Expenses:Food:Coffee
 Expenses:Transport Expenses:Housing Expenses:Housing:Rent Expenses:Housing:Utilities

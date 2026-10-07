@@ -27,7 +27,10 @@ SPECS: dict[str, dict[str, tuple[str, ...]]] = {
     "spend": {"from": ("Assets", "Liabilities"), "category": ("Expenses",)},
     "income": {"to": ("Assets", "Liabilities"), "category": ("Income",)},
     "transfer": {"from": ASSET_LIKE, "to": ASSET_LIKE},
+    "exchange": {"from": ASSET_LIKE, "to": ASSET_LIKE},  # recorded by record_exchange, not record_intent
 }
+SIMPLE_INTENTS = ("spend", "income", "transfer")
+CONVERSION_ACCOUNT_TERMS = ("汇兑", "Conversions")
 
 
 # which posting each slot fills, in the order record_intent renders them
@@ -35,6 +38,7 @@ SLOT_POSTING: dict[str, dict[str, int]] = {
     "spend": {"category": 0, "from": 1},
     "income": {"to": 0, "category": 1},
     "transfer": {"to": 0, "from": 1},
+    "exchange": {"to": 0, "from": 3},
 }
 
 
@@ -133,6 +137,7 @@ class IntentResult:
     reasons: list[str]
     event: Event | None  # None for a dry run
     currency: dict[str, Any] | None = None  # how the currency was decided: matched_by, inferred
+    details: dict[str, Any] | None = None  # kind-specific: for an exchange, what was given and got
 
     @property
     def written(self) -> bool:
@@ -144,7 +149,7 @@ class IntentResult:
             "written": self.written, "kind": self.kind, "status": self.status,
             "date": self.date, "amount": self.amount, "ccy": self.ccy,
             "postings": self.postings, "unresolved": self.unresolved, "reasons": self.reasons,
-            "currency": self.currency,
+            "currency": self.currency, "details": self.details,
         }
 
 
@@ -191,9 +196,9 @@ def record_intent(
     meta: dict[str, Any] | None = None,
 ) -> IntentResult:
     """Render one intent and (unless `dry_run`) append it to the ledger."""
-    spec = SPECS.get(kind)
+    spec = SPECS.get(kind) if kind in SIMPLE_INTENTS else None
     if spec is None:
-        raise LedgerError(f"unknown intent {kind!r}; expected one of {', '.join(SPECS)}", code="usage_error")
+        raise LedgerError(f"unknown intent {kind!r}; expected one of {', '.join(SIMPLE_INTENTS)}", code="usage_error")
     extra = set(slots) - set(spec)
     if extra:
         raise LedgerError(f"{kind} has no {sorted(extra)} slot; its slots are {sorted(spec)}", code="usage_error")
@@ -268,6 +273,125 @@ def record_intent(
         )
         event = ledger.append(raw, clamp_ts=True)
     return IntentResult(kind, status, when.isoformat(), text, ccy, postings, unresolved, reasons, event, currency)
+
+
+def record_exchange(
+    ledger: Ledger,
+    *,
+    give: Any,
+    get: Any,
+    slots: dict[str, str | None],
+    date: _dt.date | str,
+    give_ccy: str | None = None,
+    get_ccy: str | None = None,
+    payee: str | None = None,
+    narration: str | None = None,
+    confidence: float | None = None,
+    source: dict[str, str] | None = None,
+    import_hash: str | None = None,
+    actor: tuple[str, str] = ("human", "user"),
+    strict: bool = False,
+    dry_run: bool = False,
+    meta: dict[str, Any] | None = None,
+) -> IntentResult:
+    """Money in one currency leaves `from` and the same worth in another arrives in `to`.
+
+    Recorded through an Equity conversion account so that each currency still balances on its own:
+    ``to +GET``, ``conversions -GET``, ``conversions +GIVE``, ``from -GIVE``. The rate actually obtained
+    is kept in the entry's meta; nothing is fetched or assumed.
+    """
+    extra = set(slots) - {"from", "to"}
+    if extra:
+        raise LedgerError(f"an exchange has no {sorted(extra)} slot; its slots are ['from', 'to']", code="usage_error")
+    give_value, give_money = _amount_and_money(give)
+    get_value, get_money = _amount_and_money(get)
+    when = date if isinstance(date, _dt.date) else parse_date(date)
+    confidence = _confidence(confidence)
+
+    ledger.reload()
+    aliases = ledger.aliases()
+    roots = SPECS["exchange"]
+    resolutions = {slot: resolve_account(ledger.state, aliases, slots.get(slot), roots[slot], when) for slot in ("from", "to")}
+    if resolutions["from"].ok and resolutions["from"].account == resolutions["to"].account:
+        raise LedgerError(
+            f"from and to are the same account ({resolutions['to'].account}); an exchange needs two",
+            code="usage_error",
+        )
+
+    def side(money: Money | None, flag_text: str | None, slot: str):
+        res = resolutions[slot]
+        accounts = [(res.account, ledger.state.accounts[res.account].currencies)] if res.ok else []
+        return choose_currency(
+            text=money, flag=(parse_currency(flag_text) or None) if flag_text else None,
+            accounts=accounts, used=ledger.state.currencies_in_use(), base=ledger.base_currency,
+        )
+
+    give_choice, get_choice = side(give_money, give_ccy, "from"), side(get_money, get_ccy, "to")
+    give_c, get_c = check_currency(give_choice.ccy), check_currency(get_choice.ccy)
+    if give_c == get_c:
+        raise LedgerError(
+            f"both sides are {give_c}; an exchange needs two different currencies (use transfer for one currency). "
+            "Say which currency each side is, for example '100 USD' and '720 CNY'",
+            code="usage_error",
+        )
+
+    conversion = None
+    for term in CONVERSION_ACCOUNT_TERMS:
+        found = resolve_account(ledger.state, aliases, term, ("Equity",), when)
+        if found.ok:
+            conversion = found.account
+            break
+    if conversion is None:
+        raise LedgerError(
+            "an exchange is recorded through an Equity conversion account, and this ledger has none; "
+            "create one with `money-mom open Equity:汇兑` (or `Equity:Conversions`)",
+            code="no_conversion_account",
+        )
+
+    unresolved = [{"slot": slot, **res.to_dict()} for slot, res in resolutions.items() if not res.ok]
+    reasons = [f"{u['slot']}: {u['message']}" for u in unresolved]
+    if unresolved and strict:
+        raise RuleError("cannot resolve " + "; ".join(reasons), code="unresolved_account", details={"unresolved": unresolved})
+    for label, choice in (("give", give_choice), ("get", get_choice)):
+        if choice.inferred:
+            reasons.append(f"currency ({label}): {choice.message}; please confirm")
+    threshold = ledger.auto_post_confidence
+    if confidence is not None and confidence < threshold:
+        reasons.append(f"confidence {confidence:g} is below the auto-post threshold {threshold:g}")
+    status = "pending" if reasons else "posted"
+
+    give_text, get_text = format(give_value, "f"), format(get_value, "f")
+    postings = [
+        {"account": resolutions["to"].account, "amount": get_text, "ccy": get_c},
+        {"account": conversion, "amount": f"-{get_text}", "ccy": get_c},
+        {"account": conversion, "amount": give_text, "ccy": give_c},
+        {"account": resolutions["from"].account, "amount": f"-{give_text}", "ccy": give_c},
+    ]
+    rate = (get_value / give_value).quantize(Decimal("0.00000001")).normalize()
+    details = {
+        "give": {"amount": give_text, "ccy": give_c}, "get": {"amount": get_text, "ccy": get_c},
+        "rate": f"1 {give_c} = {format(rate, 'f')} {get_c}",
+    }
+    record_meta: dict[str, Any] = {
+        "intent": "exchange",
+        "given": {slot: term for slot, term in slots.items() if term},
+        "exchange": {"give": details["give"], "get": details["get"], "rate": format(rate, "f")},
+    }
+    if unresolved:
+        record_meta["unresolved"] = unresolved
+    record_meta.update(meta or {})
+
+    event = None
+    if not dry_run:
+        raw = ledger.new_event(
+            "txn", actor=actor, source=source, confidence=confidence, meta=record_meta,
+            date=when.isoformat(), status=status, postings=postings, payee=payee,
+            narration=narration, import_hash=import_hash,
+        )
+        event = ledger.append(raw, clamp_ts=True)
+    currency = {"give": give_choice.matched_by, "get": get_choice.matched_by,
+                "inferred": give_choice.inferred or get_choice.inferred}
+    return IntentResult("exchange", status, when.isoformat(), give_text, give_c, postings, unresolved, reasons, event, currency, details)
 
 
 def postings_with_slots(ledger: Ledger, target: str, slots: dict[str, str | None]) -> list[dict[str, Any]]:

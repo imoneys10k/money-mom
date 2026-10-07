@@ -23,7 +23,7 @@ from .currency import choose_currency, parse_currency, parse_money
 from .doctor import run_doctor
 from .errors import LedgerError
 from .events import ROOTS
-from .intents import SPECS, postings_with_slots, record_intent, resolve_account
+from .intents import SPECS, postings_with_slots, record_exchange, record_intent, resolve_account
 from .ledger import TONES, Ledger
 from .rates import convert_balances, fetch_frankfurter, update_rates
 from .templates import TEMPLATES, apply_template
@@ -255,10 +255,13 @@ def cmd_assert(args: argparse.Namespace) -> tuple[Any, str]:
 
 def _intent_text(result) -> str:
     verb = {"posted": "Recorded", "pending": "Pending"}[result.status]
+    what = f"{result.amount} {result.ccy}"
+    if result.details:  # an exchange: show both sides
+        what = f"{result.details['give']['amount']} {result.details['give']['ccy']} for {result.details['get']['amount']} {result.details['get']['ccy']}"
     if result.written:
-        head = f"{verb} {result.kind} of {result.amount} {result.ccy} ({result.event.id})"
+        head = f"{verb} {result.kind} of {what} ({result.event.id})"
     else:
-        head = f"Dry run, nothing written: would record a {result.status} {result.kind} of {result.amount} {result.ccy}"
+        head = f"Dry run, nothing written: would record a {result.status} {result.kind} of {what}"
     lines = [head]
     lines += [
         f"    {_ljust(p['account'] or '?', 28)} {_rjust(p['amount'], 12)} {p['ccy']}" for p in result.postings
@@ -293,6 +296,17 @@ def _intent_handler(kind: str) -> Callable[[argparse.Namespace], tuple[Any, str]
         return result.to_dict(), _intent_text(result)
 
     return handler
+
+
+def cmd_exchange(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    result = record_exchange(
+        ledger, give=args.give, get=args.get, slots={"from": args.slot_from, "to": args.slot_to},
+        date=args.date or _today(), give_ccy=args.give_ccy, get_ccy=args.get_ccy, payee=args.payee,
+        narration=args.narration, confidence=args.confidence, source=_source(args), import_hash=args.import_hash,
+        actor=_actor(args), strict=args.strict, dry_run=args.dry_run, meta=_override_meta(args),
+    )
+    return result.to_dict(), _intent_text(result)
 
 
 def cmd_alias(args: argparse.Namespace) -> tuple[Any, str]:
@@ -672,6 +686,18 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument("--strict", action="store_true", help="fail instead of recording a pending entry when an account cannot be resolved")
         p.add_argument("--dry-run", action="store_true", help="show what would be recorded, write nothing")
         lock_flag(p)
+
+    p = command("exchange", cmd_exchange, "record a currency exchange: money in one currency leaves an account and the same worth in another arrives. Recorded through an Equity conversion account; nothing is fetched")
+    p.add_argument("give", help="what you gave, e.g. '100 USD' or 100 (the currency can come from the account)")
+    p.add_argument("get", help="what you got, e.g. '720 CNY'")
+    p.add_argument("--from", dest="slot_from", metavar="ACCOUNT", help="account the money you gave leaves")
+    p.add_argument("--to", dest="slot_to", metavar="ACCOUNT", help="account the money you got arrives in")
+    p.add_argument("--give-ccy", help="currency of what you gave, as a code or word (avoids shell quoting of $)")
+    p.add_argument("--get-ccy", help="currency of what you got")
+    txn_flags(p)
+    p.add_argument("--strict", action="store_true", help="fail instead of recording a pending entry when an account cannot be resolved")
+    p.add_argument("--dry-run", action="store_true", help="show what would be recorded, write nothing")
+    lock_flag(p)
 
     p = command("alias", cmd_alias, "manage friendly names for accounts")
     alias_sub = p.add_subparsers(dest="alias_command", required=True, metavar="ACTION")
