@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from . import __version__
 from .cache import open_cache, run_query
+from .currency import choose_currency, parse_currency, parse_money
 from .doctor import run_doctor
 from .errors import LedgerError
 from .events import ROOTS
@@ -340,6 +341,32 @@ def cmd_doctor(args: argparse.Namespace) -> tuple[Any, str]:
     return data, "\n".join(lines)
 
 
+def cmd_currency(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    money = parse_money(args.text)
+    flag = parse_currency(args.ccy) if args.ccy else ()
+    when = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
+    aliases, accounts = ledger.aliases(), []
+    for name in args.account or []:
+        res = resolve_account(ledger.state, aliases, name, ROOTS, when)
+        if not res.ok:
+            raise LedgerError(f"cannot resolve account {name!r}: {res.message}", code="unresolved_account",
+                              details={"unresolved": [res.to_dict()]})
+        accounts.append((res.account, ledger.state.accounts[res.account].currencies))
+    choice = choose_currency(
+        text=money, flag=flag or None, accounts=accounts,
+        used=ledger.state.currencies_in_use(), base=ledger.base_currency,
+    )
+    data = {
+        "amount": money.amount, "ccy": choice.ccy, "matched_by": choice.matched_by, "inferred": choice.inferred,
+        "text": money.symbol, "candidates": list(money.candidates), "message": choice.message,
+    }
+    how = {"flag": "from --ccy", "text": "from the text", "account": "from the account",
+           "ledger": "from your ledger", "default": "the base currency"}[choice.matched_by]
+    text = f"{money.amount} {choice.ccy} ({how})" + (" - needs confirmation" if choice.inferred else "")
+    return data, text
+
+
 def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     problems = ledger.check()
@@ -530,10 +557,10 @@ def _build_parser() -> argparse.ArgumentParser:
         ("transfer", "move money between your own accounts (also sets opening balances from Equity)"),
     ):
         p = command(kind, _intent_handler(kind), summary + ". Unknown or ambiguous names are never guessed: the entry is recorded as pending")
-        p.add_argument("amount", help="a positive amount such as 38 or 38.50; the direction comes from the command")
+        p.add_argument("amount", help="a positive amount such as 38, 38.50 or 1,200; may carry its currency: 5美元, 'HK$200', 'USD 5' (single-quote anything with a $). The direction comes from the command")
         for slot in SPECS[kind]:
             p.add_argument(f"--{slot}", dest=f"slot_{slot}", metavar="ACCOUNT", help=slot_help[slot])
-        p.add_argument("--ccy", help="currency (default: the ledger's base currency)")
+        p.add_argument("--ccy", help="currency, as a code or a word (USD, 美元). Default: what the amount says, else what the account allows, else the base currency")
         txn_flags(p)
         p.add_argument("--strict", action="store_true", help="fail instead of recording a pending entry when an account cannot be resolved")
         p.add_argument("--dry-run", action="store_true", help="show what would be recorded, write nothing")
@@ -553,6 +580,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--type", action="append", choices=sorted(_TYPE_ROOTS), help="only this kind of account (repeatable)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
 
+    p = command("currency", cmd_currency, "show which currency a piece of text means, and how it was decided")
+    p.add_argument("text", help="for example 38, 5美元, 'HK$200' or 'USD 5' (single-quote anything with a $)")
+    p.add_argument("--ccy", help="a currency given explicitly: a code such as USD, or a word such as 美元")
+    p.add_argument("--account", action="append", help="an account involved; the currencies it allows narrow the choice (repeatable)")
+    p.add_argument("--date", help="YYYY-MM-DD (default: today)")
     command("doctor", cmd_doctor, "check the install and the ledger; a missing ledger is not an error")
     command("check", cmd_check, "replay the whole ledger and re-verify every assertion")
 

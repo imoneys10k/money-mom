@@ -102,6 +102,12 @@ class LedgerState:
             if acct == account
         }
 
+    def currencies_in_use(self) -> set[str]:
+        """Every currency the ledger has seen: in entries (posted, pending or voided) and in accounts."""
+        used = {p.ccy for rec in self.txns.values() for p in rec.postings}
+        used |= {c for info in self.accounts.values() for c in (info.currencies or ())}
+        return used
+
     def pending(self) -> list[TxnRecord]:
         return [r for r in self.txns.values() if r.status == "pending"]
 

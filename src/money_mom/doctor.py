@@ -89,6 +89,7 @@ def run_doctor(root: Path) -> dict[str, Any]:
         "posted": sum(1 for r in state.txns.values() if r.status == "posted"),
         "pending": len(state.pending()),
         "aliases": len(ledger.aliases()),
+        "currencies": sorted(state.currencies_in_use() | {ledger.base_currency}),
         "last_event_at": last,
     }
     result["ok"] = all(c["ok"] for c in checks)

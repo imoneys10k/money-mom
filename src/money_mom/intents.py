@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from .currency import Money, choose_currency, parse_currency, parse_money
 from .errors import LedgerError, RuleError
 from .events import Event, check_currency, parse_amount, parse_date
 from .ledger import Ledger
@@ -131,6 +132,7 @@ class IntentResult:
     unresolved: list[dict[str, Any]]
     reasons: list[str]
     event: Event | None  # None for a dry run
+    currency: dict[str, Any] | None = None  # how the currency was decided: matched_by, inferred
 
     @property
     def written(self) -> bool:
@@ -142,17 +144,24 @@ class IntentResult:
             "written": self.written, "kind": self.kind, "status": self.status,
             "date": self.date, "amount": self.amount, "ccy": self.ccy,
             "postings": self.postings, "unresolved": self.unresolved, "reasons": self.reasons,
+            "currency": self.currency,
         }
 
 
-def _positive_amount(value: Any) -> Decimal:
+def _amount_and_money(value: Any) -> tuple[Decimal, Money | None]:
+    """A positive amount, plus the currency written with it if the amount was text such as ``HK$200``."""
     if isinstance(value, bool) or isinstance(value, float):
-        raise LedgerError("amount must be a string, int or Decimal, never a float", code="invalid_amount")
-    text = format(value, "f") if isinstance(value, Decimal) else str(value)
+        raise LedgerError("amount must be text, an int or a Decimal, never a float", code="invalid_amount")
+    money = None
+    if isinstance(value, str):
+        money = parse_money(value)
+        text = money.amount
+    else:
+        text = format(value, "f") if isinstance(value, Decimal) else str(value)
     amount = parse_amount(text)
     if amount <= 0:
         raise LedgerError(f"amount must be greater than zero (got {text}); the direction comes from the intent", code="invalid_amount")
-    return amount
+    return amount, money
 
 
 def _confidence(value: Any) -> float | None:
@@ -189,8 +198,8 @@ def record_intent(
     if extra:
         raise LedgerError(f"{kind} has no {sorted(extra)} slot; its slots are {sorted(spec)}", code="usage_error")
 
-    value = _positive_amount(amount)
-    ccy = check_currency(ccy or ledger.base_currency)
+    value, money = _amount_and_money(amount)
+    flag = parse_currency(ccy) if ccy else ()
     when = date if isinstance(date, _dt.date) else parse_date(date)
     confidence = _confidence(confidence)
 
@@ -205,10 +214,18 @@ def record_intent(
             f"from and to are the same account ({resolutions['to'].account}); a transfer needs two",
             code="usage_error",
         )
+    choice = choose_currency(
+        text=money, flag=flag or None,
+        accounts=[(r.account, ledger.state.accounts[r.account].currencies) for r in resolutions.values() if r.ok],
+        used=ledger.state.currencies_in_use(), base=ledger.base_currency,
+    )
+    ccy = check_currency(choice.ccy)
     unresolved = [
         {"slot": slot, **res.to_dict()} for slot, res in resolutions.items() if not res.ok
     ]
     reasons = [f"{u['slot']}: {u['message']}" for u in unresolved]
+    if choice.inferred:
+        reasons.append(f"currency: {choice.message}; please confirm")
     if unresolved and strict:
         raise RuleError(
             "cannot resolve " + "; ".join(reasons), code="unresolved_account",
@@ -232,9 +249,11 @@ def record_intent(
         {"account": account(plus), "amount": text, "ccy": ccy},
         {"account": account(minus), "amount": f"-{text}", "ccy": ccy},
     ]
+    currency = {"ccy": ccy, "matched_by": choice.matched_by, "inferred": choice.inferred}
     record_meta: dict[str, Any] = {
         "intent": kind,
         "given": {slot: term for slot, term in slots.items() if term},
+        "currency": {"matched_by": choice.matched_by, **({"text": money.symbol} if money and money.symbol else {})},
     }
     if unresolved:
         record_meta["unresolved"] = unresolved
@@ -248,7 +267,7 @@ def record_intent(
             narration=narration, import_hash=import_hash,
         )
         event = ledger.append(raw, clamp_ts=True)
-    return IntentResult(kind, status, when.isoformat(), text, ccy, postings, unresolved, reasons, event)
+    return IntentResult(kind, status, when.isoformat(), text, ccy, postings, unresolved, reasons, event, currency)
 
 
 def postings_with_slots(ledger: Ledger, target: str, slots: dict[str, str | None]) -> list[dict[str, Any]]:

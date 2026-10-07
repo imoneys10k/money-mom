@@ -52,19 +52,23 @@ class Rendering(IntentCase):
                 self.assertEqual(self.bal(minus) - before_minus, -D(text), (kind, text))
 
     def test_amount_must_be_a_positive_exact_number(self):
-        for bad in ("0", "0.00", "-5", "abc", "1e3", "1,000", 1.5, True, ""):
+        for bad in ("0", "0.00", "-5", "abc", "1e3", 1.5, True, ""):
             with self.assertRaises(LedgerError, msg=repr(bad)) as ctx:
                 self.spend(bad)
             self.assertEqual(ctx.exception.code, "invalid_amount", repr(bad))
         self.spend(D("38.50"))
         self.spend(12)
+        self.assertEqual(self.spend("1,200").amount, "1200")  # thousands separators are fine
 
     def test_currency_defaults_to_the_base_currency(self):
         self.assertEqual(self.spend().ccy, "CNY")
         usd = record_intent(self.ledger, "spend", amount="5", slots={"from": "cash", "category": "咖啡"}, date=DAY, ccy="USD")
         self.assertEqual(usd.ccy, "USD")
-        with self.assertRaises(LedgerError):
-            self.spend(ccy="usd")
+        self.assertEqual(self.spend(ccy="usd").ccy, "USD")  # a currency is recognised however it is written
+        self.assertEqual(self.spend(ccy="美元").ccy, "USD")
+        with self.assertRaises(LedgerError) as ctx:
+            self.spend(ccy="XYZ")
+        self.assertEqual(ctx.exception.code, "unknown_currency")
 
     def test_unknown_kind_or_slot(self):
         with self.assertRaises(LedgerError) as ctx:
@@ -230,9 +234,10 @@ class Recording(IntentCase):
 
     def test_an_account_that_forbids_the_currency_is_a_hard_error(self):
         self.ledger.open_account("Assets:美元户", "2026-01-01", currencies=["USD"])
-        with self.assertRaises(RuleError) as ctx:
-            self.spend(slots={"from": "美元户", "category": "咖啡"})
-        self.assertEqual(ctx.exception.code, "currency_not_allowed")
+        with self.assertRaises(LedgerError) as ctx:
+            self.spend(slots={"from": "美元户", "category": "咖啡"}, ccy="CNY")
+        self.assertEqual(ctx.exception.code, "currency_conflict")
+        self.assertEqual(self.spend(slots={"from": "美元户", "category": "咖啡"}).ccy, "USD")  # inferred from the account
 
     def test_locked_periods_apply_to_intents_too(self):
         self.fund_card = record_intent(self.ledger, "transfer", amount="1000", slots={"from": "期初", "to": "银行卡"}, date="2026-10-01")
