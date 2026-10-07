@@ -478,8 +478,11 @@ def _statement_account(ledger: Ledger, account: str, when: _dt.date) -> str:
 
 
 def _statement_currency(ledger: Ledger, mapping: Mapping, account: str) -> str:
-    if mapping.ccy:
-        return mapping.ccy
+    return mapping.ccy or account_currency(ledger, account)
+
+
+def account_currency(ledger: Ledger, account: str) -> str:
+    """The currency of an account's statement when nothing else says: what the account allows, else the base."""
     choice = choose_currency(
         text=None, flag=None, accounts=[(account, ledger.state.accounts[account].currencies)],
         used=ledger.state.currencies_in_use(), base=ledger.base_currency,

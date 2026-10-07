@@ -26,10 +26,11 @@ from .errors import LedgerError
 from .events import ROOTS
 from .intents import SPECS, postings_with_slots, record_exchange, record_intent, resolve_account
 from .importing import (
-    add_rule, inspect_statement, list_mappings, load_mapping, recheck, run_import, save_mapping,
+    _money, add_rule, inspect_statement, list_mappings, load_mapping, read_statement, recheck, run_import, save_mapping,
 )
 from .ledger import TONES, Ledger
 from .rates import convert_balances, fetch_frankfurter, update_rates
+from .reconcile import reconcile, rows_from_json, seal
 from .templates import TEMPLATES, apply_template
 
 DEFAULT_HOME = "~/MoneyMom"
@@ -487,6 +488,79 @@ def cmd_import(args: argparse.Namespace) -> tuple[Any, str]:
     return data, text
 
 
+def _reconcile_text(report: dict[str, Any]) -> str:
+    lines = [
+        f"Reconciling {report['account']} ({report['ccy']}) {report['from']} to {report['to']}: "
+        f"{report['statement_rows']} statement rows, {report['ledger_entries']} ledger entries",
+        f"  matched {report['matched']} ({report['matched_by_import_hash']} by import hash)",
+    ]
+
+    def listing(title: str, entries: list[dict[str, Any]], line) -> None:
+        if entries:
+            lines.append(f"  {title} ({len(entries)}):")
+            lines.extend(f"    {line(e)}" for e in entries[:20])
+            if len(entries) > 20:
+                lines.append(f"    ... and {len(entries) - 20} more")
+
+    listing("on the statement but NOT in the ledger", report["missing_in_ledger"],
+            lambda e: f"line {e['line']}  {e['date']}  {e['amount']}  {e['payee'] or e['description']}"
+                      + ("  <- the same charge is already matched once: a possible double charge" if e["possible_double_charge"] else ""))
+    listing("in the ledger but NOT on the statement", report["missing_in_statement"],
+            lambda e: f"{e['id']}  {e['date']}  {e['amount']}  {e['text']}")
+    listing("same item, different amount", report["amount_mismatches"],
+            lambda e: f"{e['statement']['date']}  statement {e['statement']['amount']} vs ledger {e['ledger']['amount']}  (difference {e['difference']})  {e['ledger']['text']}")
+    listing("waiting as pending (not counted)", report["pending_in_range"],
+            lambda e: f"{e['id']}  {e['date']}  {e['amount']}  {e['text']}")
+    balance = report["balance"]
+    if balance:
+        note = " (the differences listed above explain it)" if balance["explained_by_the_differences_listed"] else ""
+        lines.append(f"  closing balance on {balance['date']}: statement {balance['statement']}, ledger {balance['ledger']}, "
+                     f"difference {balance['difference']}{note}")
+    lines.append("  Clean: everything matches." if report["clean"] else "  Not clean yet.")
+    if report["missing_in_ledger"]:
+        lines.append("  Add the missing rows with `money-mom import run`, or record them by hand.")
+    if report["can_assert"]:
+        lines.append("  Seal it with --assert to lock this period.")
+    if "sealed" in report:
+        lines.append(f"  Sealed: {report['sealed']['account']} is {report['sealed']['balance']} on {report['sealed']['date']} and that period is now locked.")
+    return "\n".join(lines)
+
+
+def cmd_reconcile(args: argparse.Namespace) -> tuple[Any, str]:
+    ledger = Ledger.open(_ledger_path(args))
+    if bool(args.from_json) == bool(args.file):
+        raise UsageError("give either FILE with --map, or --from-json (rows an agent read from a PDF or screenshot)")
+    if args.file:
+        if not args.map:
+            raise UsageError("a statement file needs --map, the mapping that describes it")
+        mapping = load_mapping(ledger, args.map)
+        parsed = read_statement(Path(args.file).expanduser(), mapping, encoding=args.encoding)
+        rows, ccy = parsed.rows, mapping.ccy
+    else:
+        rows, ccy = rows_from_json(_load_json(args.from_json)), None
+    closing, closing_date = None, None
+    if args.closing_balance is not None:
+        closing = _money(args.closing_balance)
+        closing_date = dt.date.fromisoformat(args.closing_date) if args.closing_date else None
+    elif args.closing_from_statement:
+        with_balance = [r for r in rows if r.balance is not None]
+        if not with_balance:
+            raise UsageError("the statement has no balance column (add `balance` under [columns] in the mapping), so give --closing-balance and --closing-date")
+        last = max(with_balance, key=lambda r: (r.date, r.line))
+        closing, closing_date = last.balance, last.date
+    if closing is not None and closing_date is None:
+        raise UsageError("give --closing-date with --closing-balance")
+    report = reconcile(
+        ledger, args.account, rows, ccy=ccy,
+        since=dt.date.fromisoformat(args.since) if args.since else None,
+        until=dt.date.fromisoformat(args.until) if args.until else None,
+        tolerance_days=args.tolerance_days, closing_balance=closing, closing_date=closing_date,
+    )
+    if args.seal:
+        report["sealed"] = seal(ledger, report, actor=_actor(args))
+    return report, _reconcile_text(report)
+
+
 def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     problems = ledger.check()
@@ -859,6 +933,20 @@ def _build_parser() -> argparse.ArgumentParser:
     q = isub.add_parser("recheck", parents=[common], help="after adding rules, confirm the pending rows that now match")
     q.add_argument("--map", required=True)
     q.add_argument("--dry-run", action="store_true")
+
+    p = command("reconcile", cmd_reconcile, "compare a statement with the ledger: what is missing, extra, different or charged twice; --assert seals a clean result")
+    p.add_argument("account", help="the account the statement belongs to")
+    p.add_argument("file", nargs="?", help="the statement file (CSV); needs --map")
+    p.add_argument("--map", help="saved mapping that describes the file")
+    p.add_argument("--from-json", metavar="FILE|-", help="rows an agent read from a PDF or screenshot: [{date, amount, payee, description, id}] (positive = money into the account)")
+    p.add_argument("--since", metavar="DATE")
+    p.add_argument("--until", metavar="DATE")
+    p.add_argument("--tolerance-days", type=int, default=3, help="how many days apart the bank and the ledger may date the same item (default 3)")
+    p.add_argument("--closing-balance", metavar="AMOUNT", help="the balance the statement ends with")
+    p.add_argument("--closing-date", metavar="DATE", help="the day that balance is for")
+    p.add_argument("--closing-from-statement", action="store_true", help="use the balance column of the statement's last row")
+    p.add_argument("--assert", dest="seal", action="store_true", help="when everything matches, record a balance assertion that locks the period")
+    p.add_argument("--encoding")
 
     command("doctor", cmd_doctor, "check the install and the ledger; a missing ledger is not an error")
     command("check", cmd_check, "replay the whole ledger and re-verify every assertion")
