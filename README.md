@@ -24,7 +24,7 @@ Money Mom 是一个装进 AI agent（Claude Code、Codex、Cursor、Gemini CLI�
 
 它做的不是“又一个记账软件”，而是让 AI 记账这件事**值得信任**：AI 只负责听懂你的话，**账由程序来记、来校验**。
 
-> **状态：pre-alpha（`0.1.0a4`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；但还没有发布到 PyPI 或 npm，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
+> **状态：pre-alpha（`0.1.0a4`）。** 账本内核、命令行、账单导入与对账、多币种、月报、图表和订阅提醒已经可以用，也都经过测试；已发布到 [PyPI](https://pypi.org/project/money-mom/)（`uv tool install "money-mom==0.1.0a4"`），npm 启动器稍后发布，投资者功能还在路上（见[路线图](ROADMAP.md)）。不要把唯一的账放在它上面。
 
 ## 一句话安装
 
@@ -185,9 +185,9 @@ Money Mom 的 skill 采用开放的 [Agent Skills](https://agentskills.io) 标�
 
 | | |
 |---|---|
-| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报与图表 · 订阅与异常提醒 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
+| 已完成 | 账本内核 · 命令行 · SQLite 查账 · 月报与图表 · 订阅与异常提醒 · 意图层（spend / income / transfer）· 账单导入与对账（映射、规则、去重、逐笔比对、封存）· 发布到 PyPI· 多币种（币种识别、汇率折算、换汇）· 中英文账户树模板 · skill 与安装说明 · `doctor` · 三系统 CI（Linux、macOS、Windows） |
 | 下一步 | “妈妈”语气档位 · 微信账单的内置预设（需要真实导出样本） |
-| 之后 | 发布到 PyPI / npm · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
+| 之后 | 发布 npm 启动器 · Claude Code 插件市场 · Beancount 导出 · 投资者包（港美股持仓与成本、已实现与未实现盈亏） |
 
 不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。
 

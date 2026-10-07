@@ -41,7 +41,7 @@ If the user would rather not install `uv`, use the pip route in 2d (needs Python
 
 ### 2b. Download the wheel and check it
 
-The release asset is `money_mom-0.1.0a4-py3-none-any.whl`. Its SHA-256 is:
+The release asset is `money_mom-0.1.0a4-py3-none-any.whl` (the same file is on PyPI as `money-mom==0.1.0a4`). Its SHA-256 is:
 
 ```
 4bfe8c8c438b829f93491221ba4f9c509576c8db070780a2e54afecde3644528
