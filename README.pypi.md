@@ -17,6 +17,7 @@ The engine behind the skill: the `money-mom` command line and the Python library
 - **Never guesses**: an unclear account or currency becomes a question or a *pending* entry, never a silent guess.
 - **Locked once reconciled**: a period checked against the bank can only be changed by you, with a written reason.
 - **Many currencies, statements, reconciliation**: currency recognition, exchange rates you fetch yourself, CSV statement import with reusable mappings, line-by-line reconciliation.
+- **Reports and charts**: a monthly report, a one-page chart sheet in a research-note style (static files, no script, amounts can be hidden before sharing), and subscription and anomaly alerts that show their evidence.
 - **Local-first**: the program does not use the network, except `money-mom rates update`, which you run yourself to fetch exchange rates (it sends only currency codes and a date).
 
 ## Install
@@ -30,7 +31,7 @@ Please read https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md and fol
 Or do it yourself. This is a pre-release, so the version is pinned (`pip` and `uv` skip pre-releases otherwise):
 
 ```bash
-uv tool install "money-mom==0.1.0a3"      # or: pipx install "money-mom==0.1.0a3"
+uv tool install "money-mom==0.1.0a4"      # or: pipx install "money-mom==0.1.0a4"
 money-mom doctor
 money-mom init --template en --base-currency USD
 money-mom spend 4.50 --from cash --category coffee

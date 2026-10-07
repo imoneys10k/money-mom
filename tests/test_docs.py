@@ -138,7 +138,7 @@ class Packaging(unittest.TestCase):
         pkg = json.loads((ROOT / "npm/package.json").read_text(encoding="utf-8"))
         self.assertEqual(pkg["moneyMomVersion"], __version__)
         match = re.fullmatch(r"(\d+\.\d+\.\d+)-(alpha|beta|rc)\.(\d+)", pkg["version"])
-        self.assertIsNotNone(match, "an npm pre-release looks like 0.1.0-alpha.3")
+        self.assertIsNotNone(match, "an npm pre-release looks like 0.1.0-alpha.4")
         letter = {"alpha": "a", "beta": "b", "rc": "rc"}[match.group(2)]
         self.assertEqual(f"{match.group(1)}{letter}{match.group(3)}", __version__)
 
