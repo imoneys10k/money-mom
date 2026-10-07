@@ -100,7 +100,7 @@ DISABLE_TELEMETRY=1 npx -y skills add imoneys10k/money-mom --skill money-mom -g 
 git clone --depth 1 --branch v0.1.0a1 https://github.com/imoneys10k/money-mom.git "$(mktemp -d)/mm"
 ```
 
-then copy `skills/money-mom/` from that clone to:
+(git may print `refs/tags/v0.1.0a1 ... is not a commit!`; that is only a warning about the annotated tag and the clone still succeeds), then copy `skills/money-mom/` from that clone to:
 
 | Agent | Folder |
 |---|---|
