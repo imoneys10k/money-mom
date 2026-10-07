@@ -69,7 +69,7 @@ jobs:
           uvx twine check dist/*
 
       - name: build the npm package once
-        run: cd npm && npm pack --pack-destination ../npm-dist
+        run: mkdir -p npm-dist && cd npm && npm pack --pack-destination ../npm-dist
 
       - name: the checksum published in INSTALL.md must be this wheel
         id: sum
