@@ -181,32 +181,32 @@ class CorruptionIsReportedNotHidden(LedgerTestCase):
 
     def test_bad_json_names_the_line(self):
         path = self.month_file()
-        path.write_text(path.read_text() + "{not json}\n", encoding="utf-8")
+        path.write_text(path.read_text(encoding="utf-8") + "{not json}\n", encoding="utf-8")
         err = self.reopen_error()
         self.assertEqual(err.code, "invalid_json")
         self.assertEqual(err.where, "2026-10.jsonl:7")
 
     def test_truncated_last_write(self):
         path = self.month_file()
-        path.write_text(path.read_text().rstrip("\n"), encoding="utf-8")
+        path.write_text(path.read_text(encoding="utf-8").rstrip("\n"), encoding="utf-8")
         self.assertEqual(self.reopen_error().code, "corrupt_tail")
 
     def test_duplicate_keys_are_rejected(self):
         path = self.month_file()
-        first, *rest = path.read_text().splitlines()
+        first, *rest = path.read_text(encoding="utf-8").splitlines()
         bad = first.replace('"kind":"open"', '"kind":"open","kind":"close"')
         path.write_text("\n".join([bad, *rest]) + "\n", encoding="utf-8")
         self.assertEqual(self.reopen_error().code, "duplicate_key")
 
     def test_nan_is_rejected(self):
         path = self.month_file()
-        path.write_text(path.read_text() + '{"v":1,"confidence":NaN}\n', encoding="utf-8")
+        path.write_text(path.read_text(encoding="utf-8") + '{"v":1,"confidence":NaN}\n', encoding="utf-8")
         self.assertEqual(self.reopen_error().code, "invalid_event")
 
     def test_rule_violations_on_disk_are_reported_with_a_location(self):
         path = self.month_file()
         self.fund()
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         del lines[1]  # drop the `open` of Assets:CMB, which the funding txn uses
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         err = self.reopen_error()
@@ -215,7 +215,7 @@ class CorruptionIsReportedNotHidden(LedgerTestCase):
 
     def test_event_in_the_wrong_month_file(self):
         path = self.month_file()
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         path.unlink()
         (self.ledger.ledger_dir / "2026-09.jsonl").write_text(text, encoding="utf-8")
         self.assertEqual(self.reopen_error().code, "misplaced_event")
@@ -228,7 +228,7 @@ class CorruptionIsReportedNotHidden(LedgerTestCase):
 
     def test_refuses_to_append_after_a_truncated_tail(self):
         path = self.month_file()
-        path.write_text(path.read_text().rstrip("\n"), encoding="utf-8")
+        path.write_text(path.read_text(encoding="utf-8").rstrip("\n"), encoding="utf-8")
         with self.assertRaises(LedgerError) as ctx:
             self.ledger.open_account("Assets:New", "2026-10-01")
         self.assertEqual(ctx.exception.code, "corrupt_tail")
