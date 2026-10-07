@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Money Mom banner</title>
+<style>
+  :root {
+    --bg: #F7F2EA; --ink: #1D1915; --muted: #7C7064; --hair: #E3D8C8;
+    --card: #FFFDF9; --accent: #BF5B3A; --soft: #F4E1D5;
+  }
+  :root[data-theme="dark"] {
+    --bg: #15120F; --ink: #F4EEE5; --muted: #A59A8A; --hair: #2F2923;
+    --card: #1C1814; --accent: #E58C66; --soft: #3A2519;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1600px; height: 420px; overflow: hidden; background: var(--bg); }
+  body { position: relative; color: var(--ink);
+         font-family: "New York", Georgia, "Songti SC", serif; -webkit-font-smoothing: antialiased; }
+  .eyebrow { position: absolute; left: 104px; top: 64px; font: 600 15px/1 "SF Compact", "SF Pro Text", system-ui, sans-serif;
+             letter-spacing: .26em; color: var(--muted); text-transform: uppercase; }
+  .brand { position: absolute; left: 104px; top: 108px; display: flex; align-items: center; gap: 26px; }
+  .mark { width: 74px; height: 74px; border-radius: 50%; background: var(--accent); position: relative; flex: none; }
+  .mark::before, .mark::after { content: ""; position: absolute; left: 21px; right: 21px; height: 7px; border-radius: 4px; background: var(--bg); }
+  .mark::before { top: 24px; } .mark::after { bottom: 24px; }
+  .word { font-size: 104px; font-weight: 600; letter-spacing: -.02em; line-height: 1; }
+  .slogan { position: absolute; left: 104px; top: 234px; font: 700 44px/1.2 "Songti SC", "Source Han Serif SC", serif; letter-spacing: .04em; }
+  .en { position: absolute; left: 104px; top: 304px; font: italic 400 25px/1.3 "New York", Georgia, serif; color: var(--muted); }
+  .tag { position: absolute; left: 104px; top: 356px; font: 500 15px/1 "SF Mono", Menlo, monospace; color: var(--muted); letter-spacing: .02em; }
+  .tag b { color: var(--accent); font-weight: 600; }
+  .card { position: absolute; right: 104px; top: 56px; width: 552px; height: 308px; border: 1.5px solid var(--hair);
+          border-radius: 18px; background: var(--card); padding: 34px 38px; font-family: "SF Mono", Menlo, monospace; }
+  .head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; color: var(--muted); }
+  .pill { font: 600 13px/1 "SF Compact", system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+          color: var(--accent); background: var(--soft); padding: 7px 12px; border-radius: 99px; }
+  .who { font-size: 21px; margin-top: 22px; color: var(--ink); font-family: "Songti SC", "SF Mono", serif; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; font-size: 21px; margin-top: 16px; }
+  .row .a { color: var(--ink); } .row .n { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .rule { height: 0; border-top: 1.5px solid var(--hair); margin-top: 22px; }
+  .sum { display: flex; justify-content: space-between; font-size: 19px; margin-top: 16px; color: var(--muted); }
+  .sum .ok { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Open source · Double-entry · Local-first</div>
+  <div class="brand"><div class="mark"></div><div class="word">Money Mom</div></div>
+  <div class="slogan">让 AI 像妈妈一样帮你管钱</div>
+  <div class="en">Let your AI look after your money like Mom would.</div>
+  <div class="tag"><b>pre-alpha</b> &nbsp;·&nbsp; MIT &nbsp;·&nbsp; github.com/imoneys10k/money-mom</div>
+
+  <div class="card">
+    <div class="head"><span>2026-10-07 &nbsp;agent · 0.95</span><span class="pill">posted</span></div>
+    <div class="who">瑞幸 · 午饭</div>
+    <div class="row"><span class="a">Expenses:餐饮:咖啡</span><span class="n">38.00 CNY</span></div>
+    <div class="row"><span class="a">Assets:支付宝</span><span class="n">-38.00 CNY</span></div>
+    <div class="rule"></div>
+    <div class="sum"><span>balance</span><span class="ok">0.00 ✓</span></div>
+  </div>
+  <script>
+    const p = new URLSearchParams(location.search);
+    if (p.get("theme") === "dark") document.documentElement.dataset.theme = "dark";
+  </script>
+</body>
+</html>

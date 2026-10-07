@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Money Mom · 让 AI 像妈妈一样帮你管钱</title>
+<meta name="description" content="Money Mom 是装进 AI agent 的开源记账能力：复式记账、只追加、从不靠猜、数据留在本地。Let your AI look after your money like Mom would.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Money Mom · 让 AI 像妈妈一样帮你管钱">
+<meta property="og:description" content="Open-source, double-entry bookkeeping for AI agents. Local-first, append-only, never guesses.">
+<meta property="og:image" content="https://imoneys10k.github.io/money-mom/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#F7F2EA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15120F" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23BF5B3A'/%3E%3Crect x='17' y='22' width='30' height='7' rx='3.5' fill='%23F7F2EA'/%3E%3Crect x='17' y='35' width='30' height='7' rx='3.5' fill='%23F7F2EA'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #F7F2EA; --bg2: #F1EADF; --ink: #1D1915; --muted: #6F645A; --hair: #E3D8C8;
+    --card: #FFFDF9; --accent: #BF5B3A; --accent-ink: #A84B2C; --soft: #F4E1D5; --on-accent: #FFFFFF;
+    --serif: "New York", "Iowan Old Style", Georgia, "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
+    --sans: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15120F; --bg2: #1A1613; --ink: #F4EEE5; --muted: #A59A8A; --hair: #2F2923;
+      --card: #1C1814; --accent: #E58C66; --accent-ink: #E58C66; --soft: #3A2519; --on-accent: #1B0F09;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15120F; --bg2: #1A1613; --ink: #F4EEE5; --muted: #A59A8A; --hair: #2F2923;
+    --card: #1C1814; --accent: #E58C66; --accent-ink: #E58C66; --soft: #3A2519; --on-accent: #1B0F09;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body { background: var(--bg); color: var(--ink); font: 17px/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
+  html[data-lang="zh"] .en, html[data-lang="en"] .zh { display: none !important; }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+
+  header.nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent);
+               backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--hair); }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .logo { display: flex; align-items: center; gap: 12px; text-decoration: none; font: 600 21px/1 var(--serif); letter-spacing: -.01em; }
+  .mark { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); position: relative; flex: none; }
+  .mark::before, .mark::after { content: ""; position: absolute; left: 8px; right: 8px; height: 3px; border-radius: 2px; background: var(--bg); }
+  .mark::before { top: 9px; } .mark::after { bottom: 9px; }
+  nav.links { display: flex; align-items: center; gap: 26px; font-size: 15px; color: var(--muted); }
+  nav.links a { text-decoration: none; } nav.links a:hover { color: var(--ink); }
+  .lang { font: 600 13px/1 var(--sans); letter-spacing: .06em; border: 1px solid var(--hair); background: transparent; color: var(--ink);
+          padding: 8px 12px; border-radius: 99px; cursor: pointer; }
+  .lang:hover { border-color: var(--muted); }
+
+  .hero { padding: 88px 0 72px; }
+  .hero .grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 56px; align-items: center; }
+  .eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font: 600 13px/1 var(--sans); letter-spacing: .22em;
+             text-transform: uppercase; color: var(--muted); margin-bottom: 26px; }
+  .pill { font: 600 12px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink);
+          background: var(--soft); padding: 7px 11px; border-radius: 99px; }
+  .nb { display: inline-block; }
+  h1, h2 { text-wrap: balance; }
+  h1 { font: 700 clamp(40px, 5.6vw, 72px)/1.14 var(--serif); letter-spacing: -.02em; }
+  html[data-lang="zh"] h1 { letter-spacing: .02em; line-height: 1.25; font-size: clamp(36px, 4.5vw, 56px); }
+  .lede { margin-top: 26px; font-size: 19px; color: var(--muted); max-width: 34em; }
+  .cta { margin-top: 36px; display: flex; flex-wrap: wrap; gap: 14px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font: 600 16px/1 var(--sans); padding: 15px 22px;
+         border-radius: 12px; border: 1px solid var(--hair); color: var(--ink); background: var(--card); }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--on-accent); }
+  .btn.primary:hover { filter: brightness(1.06); }
+
+  .chat { background: var(--card); border: 1px solid var(--hair); border-radius: 20px; padding: 26px; }
+  .msg { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+  .msg:last-of-type { margin-bottom: 0; }
+  .who { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .bubble { font-size: 17px; }
+  .msg.mom .bubble { color: var(--ink); }
+  .msg.you .bubble { color: var(--muted); }
+  .ledger { margin-top: 20px; border-top: 1px solid var(--hair); padding-top: 18px; font: 15px/1.9 var(--mono); }
+  .ledger .row { display: flex; justify-content: space-between; gap: 16px; }
+  .ledger .hd { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .ledger .sum { border-top: 1px solid var(--hair); margin-top: 8px; padding-top: 8px; color: var(--muted); }
+  .ledger .ok { color: var(--accent-ink); font-weight: 600; }
+
+  section { padding: 84px 0; border-top: 1px solid var(--hair); }
+  section.alt { background: var(--bg2); }
+  .kicker { font: 600 13px/1 var(--sans); letter-spacing: .22em; text-transform: uppercase; color: var(--accent-ink); margin-bottom: 18px; }
+  h2 { font: 700 clamp(30px, 3.6vw, 44px)/1.2 var(--serif); letter-spacing: -.015em; max-width: 20em; }
+  html[data-lang="zh"] h2 { letter-spacing: .02em; }
+  .sub { margin-top: 18px; color: var(--muted); max-width: 40em; font-size: 18px; }
+
+  .cards { margin-top: 48px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .card { background: var(--card); border: 1px solid var(--hair); border-radius: 16px; padding: 26px; }
+  .card h3 { font: 700 20px/1.3 var(--serif); margin-bottom: 10px; }
+  .card p { color: var(--muted); font-size: 16px; line-height: 1.7; }
+
+  .steps { margin-top: 48px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; counter-reset: s; }
+  .step { background: var(--card); border: 1px solid var(--hair); border-radius: 16px; padding: 26px; position: relative; }
+  .step .n { font: 600 13px/1 var(--mono); color: var(--accent-ink); letter-spacing: .1em; }
+  .step h3 { font: 700 20px/1.3 var(--serif); margin: 14px 0 12px; }
+  .step pre, .code { font: 14px/1.7 var(--mono); background: var(--bg2); border: 1px solid var(--hair); border-radius: 10px; padding: 14px 16px;
+                     white-space: pre-wrap; word-break: break-word; color: var(--ink); }
+  .step p { color: var(--muted); font-size: 15px; margin-top: 12px; }
+  .pending { margin-top: 20px; background: var(--card); border: 1px dashed var(--muted); border-radius: 16px; padding: 24px 26px; }
+  .pending h3 { font: 700 18px/1.3 var(--serif); margin-bottom: 12px; }
+
+  .install { margin-top: 40px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 28px; align-items: start; }
+  .copy { position: relative; }
+  .copy .code { padding-right: 96px; font-size: 15px; }
+  .copy button { position: absolute; top: 10px; right: 10px; font: 600 13px/1 var(--sans); padding: 9px 12px; border-radius: 8px;
+                 border: 1px solid var(--hair); background: var(--card); color: var(--ink); cursor: pointer; }
+  .copy button:hover { border-color: var(--muted); }
+  .list { list-style: none; counter-reset: i; display: grid; gap: 14px; }
+  .list li { counter-increment: i; display: grid; grid-template-columns: 28px 1fr; gap: 12px; color: var(--muted); font-size: 16px; }
+  .list li::before { content: counter(i); width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+                     font: 600 13px/1 var(--mono); background: var(--soft); color: var(--accent-ink); }
+  .note { margin-top: 18px; font-size: 14px; color: var(--muted); }
+
+  .chips { margin-top: 36px; display: flex; flex-wrap: wrap; gap: 12px; }
+  .chip { border: 1px solid var(--hair); background: var(--card); border-radius: 99px; padding: 10px 18px; font-size: 15px; }
+
+  .cols { margin-top: 44px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .col { border-top: 2px solid var(--ink); padding-top: 18px; }
+  .col.soon { border-color: var(--accent); } .col.later { border-color: var(--hair); }
+  .col h3 { font: 600 13px/1 var(--sans); letter-spacing: .2em; text-transform: uppercase; margin-bottom: 14px; }
+  .col ul { list-style: none; display: grid; gap: 9px; color: var(--muted); font-size: 16px; }
+
+  footer { padding: 44px 0 64px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 15px; }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; }
+  footer a { text-decoration: none; margin-right: 18px; } footer a:hover { color: var(--ink); }
+
+  @media (max-width: 880px) {
+    .hero { padding: 56px 0 48px; } .hero .grid, .install { grid-template-columns: 1fr; gap: 36px; }
+    .cards, .steps, .cols { grid-template-columns: 1fr; }
+    nav.links a.hide-sm { display: none; } section { padding: 60px 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .rise { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; } .rise.d1 { animation-delay: .08s; } .rise.d2 { animation-delay: .16s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#top"><span class="mark" aria-hidden="true"></span>Money Mom</a>
+    <nav class="links" aria-label="main">
+      <a class="hide-sm" href="#trust"><span class="zh">为什么可信</span><span class="en">Why trust it</span></a>
+      <a class="hide-sm" href="#how"><span class="zh">工作原理</span><span class="en">How it works</span></a>
+      <a href="#install"><span class="zh">安装</span><span class="en">Install</span></a>
+      <a class="hide-sm" href="#status"><span class="zh">状态</span><span class="en">Status</span></a>
+      <a href="https://github.com/imoneys10k/money-mom">GitHub</a>
+      <button class="lang" id="lang" type="button" aria-label="Switch language / 切换语言"><span class="zh">EN</span><span class="en">中文</span></button>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero" style="border-top:0">
+  <div class="wrap grid">
+    <div>
+      <div class="eyebrow rise">
+        <span class="zh">开源 · 复式记账 · 本地优先</span><span class="en">Open source · Double-entry · Local-first</span>
+        <span class="pill">pre-alpha</span>
+      </div>
+      <h1 class="rise d1">
+        <span class="zh"><span class="nb">让 AI 像妈妈一样</span> <span class="nb">帮你管钱</span></span>
+        <span class="en">Let your AI look after your money like Mom would.</span>
+      </h1>
+      <p class="lede rise d2">
+        <span class="zh">Money Mom 是装进 AI agent 的记账能力。说一句话，或丢一个账单，它帮你记账、查账、对账。AI 只负责听懂你的话，<b>账由程序来记、来校验</b>。</span>
+        <span class="en">Money Mom is a bookkeeping skill for AI agents. Say a sentence or drop in a statement, and it records, queries and reconciles. The AI only understands you; <b>a program keeps and checks the books</b>.</span>
+      </p>
+      <div class="cta rise d2">
+        <a class="btn primary" href="#install"><span class="zh">一句话安装</span><span class="en">One-sentence install</span> →</a>
+        <a class="btn" href="https://github.com/imoneys10k/money-mom"><span class="zh">在 GitHub 查看</span><span class="en">View on GitHub</span> ↗</a>
+      </div>
+    </div>
+
+    <div class="chat rise d2" aria-label="example">
+      <div class="msg you"><span class="who"><span class="zh">你</span><span class="en">You</span></span>
+        <span class="bubble"><span class="zh">午饭瑞幸 38，支付宝付的</span><span class="en">Lunch at Luckin, 38, paid with Alipay</span></span></div>
+      <div class="msg mom"><span class="who"><span class="zh">妈妈</span><span class="en">Mom</span></span>
+        <span class="bubble"><span class="zh">记好了：咖啡 38 元，从支付宝扣。</span><span class="en">Recorded: coffee 38, from Alipay.</span></span></div>
+      <div class="msg you"><span class="who"><span class="zh">你</span><span class="en">You</span></span>
+        <span class="bubble"><span class="zh">给小王转了 200</span><span class="en">Sent Xiao Wang 200</span></span></div>
+      <div class="msg mom"><span class="who"><span class="zh">妈妈</span><span class="en">Mom</span></span>
+        <span class="bubble"><span class="zh">这笔算借给他的、请客，还是礼金？</span><span class="en">Is that a loan, a treat, or a gift?</span></span></div>
+      <div class="ledger">
+        <div class="hd"><span>2026-10-07 · agent · 0.95</span><span class="pill">posted</span></div>
+        <div class="row"><span>Expenses:餐饮:咖啡</span><span>38.00 CNY</span></div>
+        <div class="row"><span>Assets:支付宝</span><span>-38.00 CNY</span></div>
+        <div class="row sum"><span>balance</span><span class="ok">0.00 ✓</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="trust" class="alt">
+  <div class="wrap">
+    <div class="kicker"><span class="zh">为什么可信</span><span class="en">Why you can trust it</span></div>
+    <h2><span class="zh">AI 负责听懂，程序负责记对。</span><span class="en">The AI understands. A program gets it right.</span></h2>
+    <p class="sub"><span class="zh">让 AI 直接改账本不可靠。所以 Money Mom 把“理解”和“记账”分开：每一步都有程序把关，每一笔都可追溯。</span><span class="en">Letting an AI edit a ledger directly is unreliable. Money Mom separates understanding from bookkeeping: a program guards every step, and every entry can be traced.</span></p>
+    <div class="cards">
+      <div class="card"><h3><span class="zh">复式记账</span><span class="en">Double-entry</span></h3><p><span class="zh">每笔钱都记“从哪来、到哪去”，每个币种必须恰好平衡，否则整笔拒绝。</span><span class="en">Every amount records where it came from and where it went. Each currency must balance exactly, or the entry is refused.</span></p></div>
+      <div class="card"><h3><span class="zh">AI 不直接写账</span><span class="en">The AI never writes the books</span></h3><p><span class="zh">AI 只说“花了 38，从支付宝，买咖啡”。借贷方向、校验和写入由程序完成。</span><span class="en">The AI says “spent 38, from Alipay, on coffee”. Direction, checks and writing are done by a program.</span></p></div>
+      <div class="card"><h3><span class="zh">只追加，不改历史</span><span class="en">Append-only</span></h3><p><span class="zh">记错了不擦掉，而是作废并重记。来源、置信度、谁写的，都留着。</span><span class="en">A mistake is voided and re-recorded, never erased. Source, confidence and author are always kept.</span></p></div>
+      <div class="card"><h3><span class="zh">从不靠猜</span><span class="en">Never guesses</span></h3><p><span class="zh">含糊的账户名整笔记为“待确认”，并列出候选。AI 的置信度低于 0.9 也先等你确认。</span><span class="en">A vague account name makes the entry pending, with candidates listed. An AI confidence below 0.9 also waits for you.</span></p></div>
+      <div class="card"><h3><span class="zh">对账后锁定</span><span class="en">Locked once reconciled</span></h3><p><span class="zh">核对过银行余额的时期被锁定，回头改只能由你本人写明原因。</span><span class="en">A period checked against the bank is locked. Changing it takes you, in person, with a written reason.</span></p></div>
+      <div class="card"><h3><span class="zh">本地优先</span><span class="en">Local-first</span></h3><p><span class="zh">数据留在你的电脑上，是人能读的纯文本。程序本身不联网，没有运行时依赖。</span><span class="en">Your data stays on your machine as readable text. The program never touches the network and has no runtime dependencies.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="kicker"><span class="zh">工作原理</span><span class="en">How it works</span></div>
+    <h2><span class="zh">你说话，AI 说意图，程序记账。</span><span class="en">You talk, the AI states an intent, a program does the books.</span></h2>
+    <div class="steps">
+      <div class="step"><div class="n">01</div><h3><span class="zh">你说一句话</span><span class="en">You say a sentence</span></h3>
+        <pre><span class="zh">午饭瑞幸 38，支付宝付的</span><span class="en">Lunch at Luckin, 38, Alipay</span></pre>
+        <p><span class="zh">不用选分类，不用填表。</span><span class="en">No categories to pick, no forms to fill.</span></p></div>
+      <div class="step"><div class="n">02</div><h3><span class="zh">AI 说出意图</span><span class="en">The AI states the intent</span></h3>
+        <pre>money-mom spend 38 \
+  --from 支付宝 \
+  --category 咖啡 \
+  --confidence 0.95</pre>
+        <p><span class="zh">只说业务含义，不拼借贷分录。</span><span class="en">Business meaning only, never raw debits and credits.</span></p></div>
+      <div class="step"><div class="n">03</div><h3><span class="zh">程序记账并校验</span><span class="en">A program records and checks</span></h3>
+        <pre>Expenses:餐饮:咖啡   38.00
+Assets:支付宝       -38.00
+balance               0.00 ✓</pre>
+        <p><span class="zh">追加进只增不改的本地账本。</span><span class="en">Appended to a local, append-only ledger.</span></p></div>
+    </div>
+    <div class="pending">
+      <h3><span class="zh">拿不准的时候</span><span class="en">When it is not sure</span></h3>
+      <pre class="code">money-mom spend 45 --from 微信 --category 咖
+→ <span class="zh">待确认。候选：Expenses:餐饮:咖啡</span><span class="en">pending. candidates: Expenses:餐饮:咖啡</span>
+
+money-mom confirm &lt;ID&gt; --category 餐饮:聚餐
+→ <span class="zh">已入账</span><span class="en">posted</span></pre>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="alt">
+  <div class="wrap">
+    <div class="kicker"><span class="zh">安装</span><span class="en">Install</span></div>
+    <h2><span class="zh">对你的 AI 说一句话。</span><span class="en">Say one sentence to your AI.</span></h2>
+    <p class="sub"><span class="zh">agent 会读安装说明，一步步装好，并在每个会改动你电脑的步骤前先告诉你。</span><span class="en">Your agent reads the install guide and does it step by step, telling you before anything changes your machine.</span></p>
+    <div class="install">
+      <div>
+        <div class="zh">
+          <div class="copy">
+            <div class="code" id="prompt-zh">请阅读 https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md 并按说明为我安装 Money Mom。</div>
+            <button type="button" data-copy="prompt-zh" data-done-zh="已复制" data-done-en="Copied"><span class="zh">复制</span><span class="en">Copy</span></button>
+          </div>
+          <p class="note">想让 agent 用英文引导你，换成这句：</p>
+          <div class="copy" style="margin-top:10px">
+            <div class="code" id="prompt-zh-alt">Please read https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md and follow it to install Money Mom for me.</div>
+            <button type="button" data-copy="prompt-zh-alt" data-done-zh="已复制" data-done-en="Copied"><span class="zh">复制</span><span class="en">Copy</span></button>
+          </div>
+        </div>
+        <div class="en">
+          <div class="copy">
+            <div class="code" id="prompt-en">Please read https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md and follow it to install Money Mom for me.</div>
+            <button type="button" data-copy="prompt-en" data-done-zh="已复制" data-done-en="Copied"><span class="zh">复制</span><span class="en">Copy</span></button>
+          </div>
+          <p class="note">Prefer to be guided in Chinese? Use this one:</p>
+          <div class="copy" style="margin-top:10px">
+            <div class="code" id="prompt-en-alt">请阅读 https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md 并按说明为我安装 Money Mom。</div>
+            <button type="button" data-copy="prompt-en-alt" data-done-zh="已复制" data-done-en="Copied"><span class="zh">复制</span><span class="en">Copy</span></button>
+          </div>
+        </div>
+      </div>
+      <ol class="list">
+        <li><span class="zh">装好 <code>money-mom</code> 命令：锁定版本，校验 SHA-256。</span><span class="en">Installs the <code>money-mom</code> command: pinned version, SHA-256 verified.</span></li>
+        <li><span class="zh">把 skill 装进你的 agent（Claude Code、Codex、Cursor、Gemini CLI、Copilot）。</span><span class="en">Puts the skill into your agent (Claude Code, Codex, Cursor, Gemini CLI, Copilot).</span></li>
+        <li><span class="zh">问你要中文还是英文账户树、本位币，创建账本。</span><span class="en">Asks for Chinese or English account names and a base currency, then creates the ledger.</span></li>
+        <li><span class="zh">跑一次不写入的自检，确认一切正常。</span><span class="en">Runs a self-check that writes nothing.</span></li>
+      </ol>
+    </div>
+    <p class="note"><span class="zh">目前是预发布版本（0.1.0a1）：还没有上 PyPI / npm，不要把唯一的账放在它上面。</span><span class="en">This is a pre-release (0.1.0a1): not on PyPI or npm yet. Don't keep your only copy of the books in it.</span></p>
+
+    <div class="chips" aria-label="agents">
+      <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">Cursor</span><span class="chip">Gemini CLI</span><span class="chip">GitHub Copilot</span>
+      <span class="chip"><span class="zh">以及其他支持 Agent Skills 的 agent</span><span class="en">and other Agent Skills clients</span></span>
+    </div>
+    <p class="note"><span class="zh">skill 采用开放的 Agent Skills 标准，已通过官方校验器。诚实地说：安装器已在隔离环境验证过，但还没有在每个 agent 里逐一实测对话效果。</span><span class="en">The skill follows the open Agent Skills standard and passes the official validator. To be straight: the installer is verified in an isolated environment, but conversation behaviour is not yet tested in every agent.</span></p>
+  </div>
+</section>
+
+<section id="status">
+  <div class="wrap">
+    <div class="kicker"><span class="zh">状态</span><span class="en">Status</span></div>
+    <h2><span class="zh">pre-alpha：核心可用，其余在路上。</span><span class="en">Pre-alpha: the core works, the rest is on the way.</span></h2>
+    <div class="cols">
+      <div class="col"><h3><span class="zh">已完成</span><span class="en">Done</span></h3><ul>
+        <li><span class="zh">账本内核：复式、只追加、对账锁定</span><span class="en">Ledger core: double-entry, append-only, locking</span></li>
+        <li><span class="zh">命令行与 SQL 查账</span><span class="en">Command line and SQL queries</span></li>
+        <li><span class="zh">意图层：spend / income / transfer</span><span class="en">Intents: spend / income / transfer</span></li>
+        <li><span class="zh">中英文账户树模板</span><span class="en">Chinese and English account templates</span></li>
+        <li><span class="zh">skill、安装说明、doctor</span><span class="en">Skill, install guide, doctor</span></li>
+        <li><span class="zh">三系统 CI</span><span class="en">CI on Linux, macOS, Windows</span></li></ul></div>
+      <div class="col soon"><h3><span class="zh">下一步</span><span class="en">Next</span></h3><ul>
+        <li><span class="zh">月报</span><span class="en">Monthly report</span></li>
+        <li><span class="zh">银行对账与账单导入</span><span class="en">Bank reconciliation and statement import</span></li>
+        <li><span class="zh">订阅与异常提醒</span><span class="en">Subscription and anomaly alerts</span></li>
+        <li><span class="zh">“妈妈”语气档位</span><span class="en">“Mom” tone levels</span></li></ul></div>
+      <div class="col later"><h3><span class="zh">之后</span><span class="en">Later</span></h3><ul>
+        <li><span class="zh">发布到 PyPI / npm</span><span class="en">PyPI and npm</span></li>
+        <li><span class="zh">Claude Code 插件市场</span><span class="en">Claude Code plugin marketplace</span></li>
+        <li><span class="zh">Beancount 导出</span><span class="en">Beancount export</span></li>
+        <li><span class="zh">投资者包：多币种、港美股、净资产</span><span class="en">Investor pack: multi-currency, HK/US holdings, net worth</span></li></ul></div>
+    </div>
+    <p class="note"><span class="zh">不做什么：不碰转账、下单等任何资金操作；不保存银行凭证；银行与券商数据只读导入。</span><span class="en">What it will not do: move money or place orders, store bank credentials, or go beyond read-only import of bank and broker data.</span></p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><span class="zh">开源，MIT 许可证。</span><span class="en">Open source, MIT license.</span></div>
+    <div>
+      <a href="https://github.com/imoneys10k/money-mom">GitHub</a>
+      <a href="https://github.com/imoneys10k/money-mom/blob/main/INSTALL.md">INSTALL</a>
+      <a href="https://github.com/imoneys10k/money-mom/blob/main/ROADMAP.md"><span class="zh">路线图</span><span class="en">Roadmap</span></a>
+      <a href="https://github.com/imoneys10k/money-mom/blob/main/README.en.md">README (EN)</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var titles = { zh: "Money Mom · 让 AI 像妈妈一样帮你管钱", en: "Money Mom · Let your AI look after your money like Mom would" };
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+  function set(lang) {
+    root.dataset.lang = lang; root.lang = lang === "zh" ? "zh-CN" : "en"; document.title = titles[lang]; store("mm-lang", lang);
+  }
+  var theme = new URLSearchParams(location.search).get("theme");
+  if (theme === "dark" || theme === "light") root.dataset.theme = theme;
+  var q = new URLSearchParams(location.search).get("lang");
+  set(q === "en" || q === "zh" ? q : (store("mm-lang") === "en" ? "en" : "zh"));
+  document.getElementById("lang").addEventListener("click", function () { set(root.dataset.lang === "zh" ? "en" : "zh"); });
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = document.getElementById(btn.dataset.copy).textContent.trim();
+      var done = function () {
+        var spans = btn.querySelectorAll("span"), old = [].map.call(spans, function (s) { return s.textContent; });
+        spans[0].textContent = btn.dataset.doneZh; spans[1].textContent = btn.dataset.doneEn;
+        setTimeout(function () { spans.forEach(function (s, i) { s.textContent = old[i]; }); }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, done); }
+      else { var t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (e) {} t.remove(); done(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

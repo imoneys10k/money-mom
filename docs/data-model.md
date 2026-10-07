@@ -123,6 +123,14 @@
 - **锁定（已确认）：** 某账户有未作废的断言后，涉及该账户的新交易、确认或作废，若日期不晚于该断言日期，一律拒绝。确需补记，须由**人**在事件的 `meta` 里写 `override_lock` 及原因；**agent 不能自行覆盖**。
 - 覆盖锁定之后旧断言会不再成立，`check` 会报告。处理办法是作废旧断言（`void` 指向它）并追加新断言，这样改动留有痕迹。
 
+## 写入策略
+
+以下规则只在**新写入**时检查，回放旧账时不检查：
+
+- `actor.type` 为 `agent` 的交易必须带 `confidence`，否则拒绝（`confidence_required`）。
+- 这类交易若 `status` 为 `posted` 且 `confidence` 低于 `auto_post_confidence`（默认 0.9），拒绝（`confidence_too_low`），应记为 `pending`。
+- `actor` 是调用者自报的，所以这些规则防的是疏忽，不是欺骗。
+
 ## 推导：SQLite 缓存
 
 `cache.sqlite` 只是读视图，随时可由事件流重建。核心表：`accounts`、`txns`、`postings`、`assertions`、`events`。给 agent 用的视图：

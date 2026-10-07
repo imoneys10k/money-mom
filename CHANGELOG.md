@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.1.0a1] - 2026-10-07
+
+首个预发布版本。账本内核、命令行、SQLite 查账、意图层、skill 与安装说明可用；还没有发布到 PyPI / npm。
+
 ### Added
 - 项目立项：README、ROADMAP、设计文档、Agent 约定、MIT 许可证。
 - `docs/agents.md`：各主流 agent 的 skill 加载与安装方式调研（依据官方文档）。
@@ -18,6 +22,12 @@
 - 结构化意图 `spend` / `income` / `transfer`：agent 只说业务含义，借贷方向由程序决定；账户名按全名、别名、唯一末段解析，**拿不准不猜**——未解析的名字或低于 `auto_post_confidence`（默认 0.9）的置信度记为待确认，并附候选账户；`--strict` 改为报错，`--dry-run` 只预览。
 - `confirm ID --category/--from/--to` 按槽位名补全待确认的意图记录。
 - `init --template cn|en`（中文与英文账户树，含别名）、`alias add|list|remove`、`resolve`。
+
+- `skills/money-mom/SKILL.md`（含命令与 SQL 参考）与 `INSTALL.md`：agent 读了就能装、能用；安装包经 SHA-256 校验。
+- `money-mom doctor`：安装与账本健康检查；没有账本不算错误。
+- 写入策略：agent 记的每笔交易必须带置信度，低于 `auto_post_confidence` 不能直接入账（只对新写入生效，不影响回放旧账）。
+- 中英文 README、GitHub Pages 主页（中文默认、可切英文、自动适配深色模式）、banner 与分享图。
+- CI：skill 校验与占位符检查；Pages 自动部署。
 
 ### Changed
 - 设计文档：确定 Python 标准库内核、npm 轻量启动器、Agent Skills 标准发布、引擎与 skill 分离并锁定版本。

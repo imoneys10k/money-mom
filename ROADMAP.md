@@ -25,7 +25,7 @@
 - [x] 账户树模板：`init --template cn|en`（含别名）；`alias` 与 `resolve` 命令
 - [ ] 更多意图：`refund`（退款）、借出与还款、跨币种转账（随 M5）
 - [ ] 导出 Beancount，并以 `bean-check` 做差分测试（开发期依赖，非运行时依赖）
-- [ ] `SKILL.md` 与 agent 指令文件
+- [x] `SKILL.md`（通过官方校验器）与命令、SQL 参考；`doctor` 自检；agent 记账必须带置信度且低于阈值不能直接入账
 - [ ] 评测集 v0 与合成 demo 账本（不含任何真实数据）
 - [ ] 月报命令 `report`
 
@@ -33,20 +33,20 @@
 
 目标：对 AI 说一句话就能装好，且跨 agent、跨平台。
 
-- [ ] 仓库布局：`skills/money-mom/SKILL.md`，并用 `skills-ref validate` 校验
-- [ ] `INSTALL.md`：写给 agent 读的安装说明，README 里放“一句话安装”提示词
-- [ ] 实测通用安装器：`npx skills add imoneys10k/money-mom` 在各 agent 上能装好
+- [x] 仓库布局：`skills/money-mom/SKILL.md`，CI 里用 `skills-ref validate` 校验
+- [x] `INSTALL.md`：写给 agent 读的安装说明（校验 SHA-256），README 里放“一句话安装”提示词
+- [x] 通用安装器 `npx skills add` 已在隔离环境验证：文件放到 `~/.agents/skills`，Claude Code 软链接过去；**各 agent 内的对话效果尚未逐一实测**
 - [ ] 发布 PyPI 包 `money-mom`（引擎），skill 锁定版本调用 `uvx money-mom==x.y.z`
 - [ ] 发布 npm 包 `money-mom`（轻量启动器，找到或安装 `uv` 后调用引擎）
 - [ ] `money-mom init`：创建账本目录（仓库之外）
-- [ ] `money-mom doctor`：自检环境、版本、账本目录与权限
+- [x] `money-mom doctor`：自检环境、版本、账本目录与权限
 - [ ] Claude Code 插件市场入口（`.claude-plugin/marketplace.json`）
 - [ ] 逐个 agent 实测：Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot
 - [ ] 为不支持 skill 的 agent 提供 `AGENTS.md` 兜底说明
 - [x] GitHub Actions：Linux / macOS / Windows × Python 3.11–3.13 的测试
 - [ ] GitHub Actions：打包与发布
-- [ ] Release 流程：语义化版本、CHANGELOG、Release notes
-- [ ] 项目主页（GitHub Pages）
+- [x] Release 流程文档 [docs/releasing.md](docs/releasing.md)；首个预发布 `v0.1.0a1`（wheel 附在 Release 上）
+- [x] 项目主页（GitHub Pages，中文默认，可切英文）与中英文 README
 
 ## M3 · 导入
 
