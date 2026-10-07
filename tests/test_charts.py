@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from money_mom.charts import (
-    KINDS, axis_label, build_exhibits, chart_data, fit, group, nice_ticks, render, signed, wrap,
+    KINDS, axis_label, build_exhibits, chart_data, fit, group, key_points, nice_ticks, render, signed, sparkline, wrap,
 )
 from money_mom.errors import LedgerError
 from money_mom.report import monthly_report, monthly_series
@@ -49,6 +49,18 @@ class Formatting(unittest.TestCase):
             self.assertEqual(len(steps), 1, (lo, hi, ticks))
             self.assertLessEqual(len(ticks), 12)
         self.assertIn(0, nice_ticks(-500, 1200))
+
+    def test_wrapping_keeps_numbers_and_words_whole(self):
+        text = "净资产 128,923.56 CNY, 较 2026-01 末 +115,182.56"
+        for width in range(200, 330, 5):  # whatever the width, no number is cut in two
+            lines = wrap(text, 15, width)
+            self.assertLessEqual(len(lines), 2)
+            if not lines[-1].endswith("…"):
+                for token in ("128,923.56", "2026-01", "+115,182.56"):
+                    self.assertTrue(any(token in line for line in lines), (width, token, lines))
+        self.assertEqual(wrap("short", 16, 300), ["short"])
+        self.assertTrue(wrap("x" * 200, 16, 100)[-1].endswith("…"))
+        self.assertEqual(wrap("", 16, 100), [])
 
     def test_text_fitting(self):
         self.assertEqual(fit("short", 10, 200), "short")
@@ -105,7 +117,7 @@ class WellFormed(ChartCase):
                     if kind == "sheet":
                         out = self.draw(kind, lang=lang, hide=hide)
                         self.assertTrue(out.startswith("<!doctype html>"))
-                        self.assertEqual(out.count("<svg"), 5)
+                        self.assertEqual(len(re.findall(r'<svg[^>]*role="img"', out)), 10)  # five, at desktop and phone width
                         continue
                     svg = self.draw(kind, lang=lang, hide=hide, fmt="svg")
                     root = ET.fromstring(svg)
@@ -149,7 +161,8 @@ class WellFormed(ChartCase):
         from money_mom.charts import Exhibit, esc
         hostile = '</text><script>alert(1)</script>&"\''
         self.assertEqual(esc(hostile), "&lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt;&amp;&quot;&#x27;")
-        ex = Exhibit(1, hostile, hostile, "en", hide=False)
+        ex = Exhibit(1, hostile, "en", hide=False)
+        ex.begin(hostile)
         ex.warning = hostile
         ex.add(f'<text>{esc(hostile)}</text>')
         ex.table = ([hostile], [[hostile]])
@@ -244,6 +257,110 @@ class Honesty(ChartCase):
             self.assertIn("<svg", out)
         for kind in ("spending", "waterfall", "trend"):
             self.assertIn("没有可显示的数据", render(kind, report, series, fmt="svg", generated=TODAY))
+
+
+class Sheet(ChartCase):
+    def test_the_page_leads_with_the_result_then_key_points_then_the_charts(self):
+        self.usual()
+        out = self.draw("sheet", lang="en")
+        lead, points, charts, notes = (out.index(x) for x in ('class="lead"', 'class="points"', 'class="stack"', 'class="notes"'))
+        self.assertLess(lead, points)
+        self.assertLess(points, charts)
+        self.assertLess(charts, notes)
+        report, _ = self.figures()
+        self.assertIn("+" + group(report["net"]), out)
+        self.assertIn("Net saved", out)
+
+    def test_every_chart_is_drawn_at_desktop_and_at_phone_width_and_only_one_is_read_aloud(self):
+        self.usual()
+        out = self.draw("sheet")
+        self.assertIn('viewBox="0 0 1120 380"', out)   # the wide trend chart
+        self.assertIn('viewBox="0 0 548 400"', out)    # a half-width chart
+        self.assertIn('viewBox="0 0 360 380"', out)    # the phone version of the trend chart
+        self.assertEqual(out.count('role="img" aria-hidden="true"'), 5)  # the phone drawings are hidden from screen readers
+        self.assertIn("@media (max-width:820px)", out)
+        self.assertIn(".mob{display:block}", out)
+
+    def test_a_loss_is_shown_as_overspending(self):
+        self.money("2026-09-05", "Expenses:Rent", "300")
+        out = self.draw("sheet", lang="en")
+        self.assertIn("Overspent", out)
+        self.assertIn('class="big neg"', out)
+
+    def test_hidden_mode_masks_the_lead_and_the_kpis(self):
+        self.usual()
+        out = self.draw("sheet", hide=True)
+        self.assertIn("••••", out)
+        self.assertNotIn('class="chip', out)  # a chip states an amount
+        report, _ = self.figures()
+        self.assertNotIn(group(report["net"]), out)
+
+    def test_spending_up_is_bad_and_income_up_is_good_in_the_chips(self):
+        self.salary("2026-08-01", "10000")
+        self.salary("2026-09-01", "12000")
+        self.money("2026-08-05", "Expenses:Rent", "1000")
+        self.money("2026-09-05", "Expenses:Rent", "2000")
+        out = self.draw("sheet", lang="en")
+        kpis = out[out.index('class="kpis"'):out.index('class="sec"')]
+        income, spending = (kpis[kpis.index(f">{name}<"):] for name in ("Income", "Spending"))
+        self.assertRegex(income[:400], r'chip good">▲')
+        self.assertRegex(spending[:400], r'chip bad">▲')
+
+    def test_the_sparkline_draws_gaps_and_marks_the_last_point(self):
+        svg = sparkline([1.0, 2.0, None, 3.0, 4.0, 2.0])
+        self.assertEqual(svg.count("<polyline"), 2)
+        self.assertEqual(svg.count("<circle"), 1)
+        self.assertEqual(sparkline([1.0]), "")
+        self.assertEqual(sparkline([None, None, 3.0]), "")
+        flat = sparkline([5.0, 5.0, 5.0])
+        self.assertIn("polyline", flat)  # a flat line is still a line, not a division by zero
+
+    def test_key_points_say_what_happened_and_what_to_doubt(self):
+        self.usual()
+        self.ledger.add_txn("2026-09-25", [("Expenses:Dining", "9", "CNY"), (None, "-9", "CNY")], status="pending")
+        report, _ = self.figures()
+        points = key_points(report, "en", False)
+        kinds = [k for k, _ in points]
+        text = " ".join(t for _, t in points)
+        self.assertIn("up", kinds)
+        self.assertIn("Saved", text)
+        self.assertIn("Rent", text)
+        self.assertIn("Pending entries not counted: 1", text)
+        hidden = " ".join(t for _, t in key_points(report, "en", True))
+        self.assertNotIn(group(report["net"]), hidden)
+        self.assertNotIn("CNY", hidden)
+
+    def test_more_spending_is_a_down_point_and_less_spending_is_an_up_point(self):
+        self.money("2026-08-05", "Expenses:Dining", "100")
+        self.money("2026-08-06", "Expenses:Rent", "500")
+        self.money("2026-09-05", "Expenses:Dining", "300")   # +200
+        self.money("2026-09-06", "Expenses:Rent", "450")     # -50
+        report, _ = self.figures()
+        by_text = {text: kind for kind, text in key_points(report, "en", False)}
+        spending = next(k for text, k in by_text.items() if text.startswith("Spending is up"))
+        category = next(k for text, k in by_text.items() if text.startswith("Dining is up"))
+        self.assertEqual((spending, category), ("down", "down"))
+        # and the other way round
+        self.ledger.void(next(r.id for r in self.ledger.state.txns.values() if r.date == dt.date(2026, 9, 5)), "undo")
+        self.money("2026-09-07", "Expenses:Dining", "20")
+        report, _ = self.figures()
+        by_text = {text: kind for kind, text in key_points(report, "en", False)}
+        self.assertEqual(next(k for text, k in by_text.items() if text.startswith("Spending is down")), "up")
+        self.assertEqual(next(k for text, k in by_text.items() if text.startswith("Dining is down")), "up")
+
+    def test_key_points_flag_an_unfinished_month_and_missing_rates(self):
+        self.usual()
+        self.ledger.add_txn("2026-10-02", [("Expenses:Gift", "5", "EUR"), ("Assets:EUR", "-5", "EUR")])
+        report = monthly_report(self.ledger, "2026-10", today=TODAY)
+        text = " ".join(t for _, t in key_points(report, "en", False))
+        self.assertIn("month to date", text)
+        self.assertIn("EUR", text)
+
+    def test_no_key_points_are_invented_for_an_empty_month(self):
+        report, _ = self.figures()
+        self.assertEqual(key_points(report, "en", False), [])
+        out = self.draw("sheet")
+        self.assertNotIn('class="points"', out)
 
 
 class Content(ChartCase):

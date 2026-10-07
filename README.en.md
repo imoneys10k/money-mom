@@ -135,10 +135,11 @@ money-mom chart spending --format svg --lang en     # a single chart as SVG
 money-mom chart --hide-amounts                      # shares and shapes only, with no amounts, safe to share
 ```
 
-<p align="center"><img src="assets/charts-en.png" alt="Sample monthly summary: spending mix, change on the month before, income and spending trend, net worth, income to net" width="860"></p>
+<p align="center"><img src="assets/charts-en.png" alt="Sample monthly summary: net saved, indicator cards with trends, key points, income and spending trend, spending mix, change on the month before, net worth, income to net" width="860"></p>
 
 *Generated from synthetic demo data.*
 
+- **The result first, then the charts:** the page opens with the one number that matters (net saved, and where the income went), then indicator cards with small trend lines and a few plain key points (savings rate, the biggest category, the change on last month, and what to doubt: pending entries, missing rates, an unfinished month), and only then the five charts. On a phone it switches to versions redrawn for a narrow screen, so the text never shrinks to nothing.
 - **The look of a research note:** deep navy and steel grey with a single amber accent, muted red and green for direction, hairline horizontal gridlines only, tabular figures, headlines that state the finding, a source line under every chart and an expandable data table. Spending up is red with ▲ and down is green with ▼, so colour is never the only signal. It follows the system dark mode and prints cleanly.
 - **Charts only draw figures the report already computed.** Conversion follows the same rules; a currency with no rate is marked on the chart, and a month with no data is a gap, never a zero bar.
 - **Just static files:** no script, no web font, no external resource, no network; they open offline. `--format json` gives an agent the figures behind a chart so it can draw its own.
