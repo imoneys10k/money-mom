@@ -31,4 +31,4 @@ jobs:
       - name: validate the skill against the Agent Skills spec
         run: uvx --from "git+https://github.com/agentskills/agentskills@69ef37e9424c0a7ea9dd2293b559e43ec8176379#subdirectory=skills-ref" skills-ref validate skills/money-mom
       - name: no unfilled placeholders in the docs
-        run: "! grep -rn '{{' INSTALL.md README.md README.en.md skills site"
+        run: "! grep -rnI '{{' INSTALL.md README.md README.en.md skills site"
