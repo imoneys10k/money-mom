@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from . import __version__
 from .cache import open_cache, run_query
+from .doctor import run_doctor
 from .errors import LedgerError
 from .events import ROOTS
 from .intents import SPECS, postings_with_slots, record_intent, resolve_account
@@ -322,6 +323,23 @@ def cmd_resolve(args: argparse.Namespace) -> tuple[Any, str]:
     return res.to_dict(), text
 
 
+def cmd_doctor(args: argparse.Namespace) -> tuple[Any, str]:
+    data = run_doctor(_ledger_path(args))
+    lines = [f"money-mom {data['version']}  ledger: {data['path']}"]
+    lines += [f"  [{'ok' if c['ok'] else 'FAIL'}] {c['name']}: {c['detail']}" for c in data["checks"]]
+    info = data["ledger"]
+    if info:
+        lines.append(
+            f"  {info['accounts']} accounts, {info['posted']} posted, {info['pending']} pending; "
+            f"base currency {info['base_currency']}, tone {info['tone']}, "
+            f"auto-post confidence {info['auto_post_confidence']:g}"
+        )
+    if data["next_step"]:
+        lines.append("  " + data["next_step"])
+    lines.append("Healthy." if data["ok"] else "Problems found.")
+    return data, "\n".join(lines)
+
+
 def cmd_check(args: argparse.Namespace) -> tuple[Any, str]:
     ledger = Ledger.open(_ledger_path(args))
     problems = ledger.check()
@@ -535,6 +553,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--type", action="append", choices=sorted(_TYPE_ROOTS), help="only this kind of account (repeatable)")
     p.add_argument("--date", help="YYYY-MM-DD (default: today)")
 
+    command("doctor", cmd_doctor, "check the install and the ledger; a missing ledger is not an error")
     command("check", cmd_check, "replay the whole ledger and re-verify every assertion")
 
     p = command("balance", cmd_balance, "show balances (exact decimals)")
@@ -586,7 +605,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {err}", file=sys.stderr)
         return 2 if err.code == "usage_error" else 1
     print(_dump({"ok": True, "data": data}) if args.json else text)
-    if args.command == "check" and not data["ok"]:
+    if args.command in ("check", "doctor") and not data["ok"]:
         return 1
     return 0
 

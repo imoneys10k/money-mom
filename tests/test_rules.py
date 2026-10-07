@@ -216,7 +216,7 @@ class Locking(RuleTestCase):
     def test_agent_cannot_override_a_lock(self):
         self.assertRule(
             "lock_override_denied", self.coffee, date="2026-10-02",
-            actor=AGENT, meta={"override_lock": "agent says so"},
+            actor=AGENT, confidence=1, meta={"override_lock": "agent says so"},
         )
 
     def test_blank_override_reason_does_not_count(self):
@@ -244,7 +244,8 @@ class Locking(RuleTestCase):
 
     def test_confirm_is_locked_too(self):
         ev = self.ledger.add_txn(
-            "2026-10-02", [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")], status="pending", actor=AGENT
+            "2026-10-02", [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")], status="pending",
+            actor=AGENT, confidence=0.6,
         )
         good = [("Expenses:Gift", "5", "CNY"), ("Assets:CMB", "-5", "CNY")]
         self.assertRule("period_locked", self.ledger.confirm, ev.id, good, actor=AGENT)
@@ -282,3 +283,52 @@ class ImportsAndOrdering(RuleTestCase):
         ev = self.coffee()
         raw = dict(ev.raw)
         self.assertRule("duplicate_id", self.ledger.append, raw)
+
+
+class AgentWritePolicy(RuleTestCase):
+    def rec(self, **kw):
+        kw.setdefault("actor", AGENT)
+        return self.coffee(**kw)
+
+    def test_an_agent_must_state_a_confidence(self):
+        err = self.assertRule("confidence_required", self.rec)
+        self.assertIn("--confidence", err.message)
+        self.assertRule(
+            "confidence_required", self.ledger.add_txn, "2026-10-07",
+            [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")], status="pending", actor=AGENT,
+        )
+
+    def test_a_low_confidence_cannot_be_posted_directly(self):
+        err = self.assertRule("confidence_too_low", self.rec, confidence=0.89)
+        self.assertEqual(err.details, {"confidence": 0.89, "threshold": 0.9})
+        self.rec(confidence=0.9)
+        self.rec(confidence=1)
+
+    def test_a_low_confidence_can_be_recorded_as_pending(self):
+        self.ledger.add_txn(
+            "2026-10-07", [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")],
+            status="pending", actor=AGENT, confidence=0.2,
+        )
+        self.assertEqual(len(self.ledger.state.pending()), 1)
+
+    def test_people_are_not_held_to_it(self):
+        self.coffee()  # human, no confidence
+        self.coffee(confidence=0.1)  # a person can post what they like
+
+    def test_the_threshold_comes_from_the_config_and_is_not_applied_on_replay(self):
+        self.rec(confidence=0.9)
+        path = self.root / "money-mom.toml"
+        path.write_text(path.read_text(encoding="utf-8") + "auto_post_confidence = 0.99\n", encoding="utf-8")
+        from money_mom import Ledger
+        strict = Ledger.open(self.root, clock=self.clock)  # the 0.9 entry is old history: it still loads
+        self.assertEqual(len(strict.state.txns), 1)
+        self.assertRaises(RuleError, strict.add_txn, "2026-10-07",
+                          [("Expenses:Dining:Coffee", "1", "CNY"), ("Assets:CMB", "-1", "CNY")],
+                          actor=AGENT, confidence=0.95)
+
+    def test_confirming_is_not_restricted_by_actor(self):
+        ev = self.ledger.add_txn(
+            "2026-10-07", [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")],
+            status="pending", actor=AGENT, confidence=0.5,
+        )
+        self.ledger.confirm(ev.id, [("Expenses:Gift", "5", "CNY"), ("Assets:CMB", "-5", "CNY")], actor=AGENT)

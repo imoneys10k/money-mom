@@ -74,7 +74,8 @@ class Basics(CliTestCase):
         self.run_cli("init")
         self.run_cli("open", "Assets:CMB", "--date", "2026-10-01")
         self.run_cli("open", "Equity:Opening", "--date", "2026-10-01")
-        self.run_cli("add", "--date", "2026-10-02", "--posting", "Assets:CMB 5 CNY", "--posting", "Equity:Opening -5 CNY")
+        self.run_cli("add", "--date", "2026-10-02", "--posting", "Assets:CMB 5 CNY", "--posting", "Equity:Opening -5 CNY",
+                     "--confidence", "1")
         out, _ = self.run_cli("--json", "query", "SELECT actor_type, actor_name FROM txns")
         self.assertEqual(json.loads(out)["data"]["rows"], [["agent", "from-env"]])
 
@@ -202,7 +203,7 @@ class LockingFromTheCli(CliTestCase):
         self.js("assert", "Assets:CMB", "1000.00", "CNY", "--date", "2026-10-05")
         late = ("add", "--date", "2026-10-02", "--posting", "Expenses:Gift 1 CNY", "--posting", "Assets:CMB -1 CNY")
         self.assertEqual(self.js(*late, expect=1)["error"]["code"], "period_locked")
-        denied = self.js(*late, "--actor", "agent:t", "--override-lock", "I want to", expect=1)
+        denied = self.js(*late, "--actor", "agent:t", "--confidence", "1", "--override-lock", "I want to", expect=1)
         self.assertEqual(denied["error"]["code"], "lock_override_denied")
         self.js(*late, "--override-lock", "forgot a gift")
         problems = self.js("check", expect=1)["data"]
@@ -235,6 +236,48 @@ class QueryCommand(CliTestCase):
         self.assertEqual(listed["Assets:Alipay"]["currencies"], ["CNY"])
         self.assertIsNone(listed["Assets:CMB"]["closed"])
         self.run_cli("--ledger", str(self.root), "accounts")
+
+
+class Doctor(CliTestCase):
+    def test_no_ledger_yet_is_healthy_and_says_what_to_do(self):
+        data = self.js("doctor")["data"]
+        self.assertTrue(data["ok"])
+        self.assertIsNone(data["ledger"])
+        self.assertIn("money-mom init", data["next_step"])
+        self.assertEqual({c["name"] for c in data["checks"]}, {"python", "sqlite"})
+
+    def test_healthy_ledger_reports_its_settings(self):
+        self.js("init", "--template", "cn", "--tone", "gentle", "--date", "2026-01-01")
+        data = self.js("doctor")["data"]
+        self.assertTrue(data["ok"])
+        self.assertEqual(
+            {c["name"] for c in data["checks"]}, {"python", "sqlite", "ledger", "assertions", "writable", "cache"}
+        )
+        info = data["ledger"]
+        self.assertEqual((info["tone"], info["base_currency"], info["auto_post_confidence"]), ("gentle", "CNY", 0.9))
+        self.assertEqual((info["posted"], info["pending"]), (0, 0))
+        self.assertGreater(info["accounts"], 40)
+        out, _ = self.run_cli("--ledger", str(self.root), "doctor")
+        self.assertIn("[ok] ledger", out)
+        self.assertTrue(out.rstrip().endswith("Healthy."))
+
+    def test_a_corrupt_ledger_fails_with_exit_1(self):
+        self.js("init", "--template", "cn", "--date", "2026-01-01")
+        month = next((self.root / "ledger").glob("*.jsonl"))
+        month.write_text(month.read_text(encoding="utf-8") + "{oops}\n", encoding="utf-8")
+        data = self.js("doctor", expect=1)["data"]
+        self.assertFalse(data["ok"])
+        failed = [c for c in data["checks"] if not c["ok"]]
+        self.assertEqual([c["name"] for c in failed], ["ledger"])
+        self.assertIn("invalid_json", failed[0]["detail"])
+
+    def test_broken_assertions_fail_the_doctor(self):
+        self.js("init", "--template", "cn", "--date", "2026-01-01")
+        self.js("transfer", "100", "--from", "期初", "--to", "银行卡", "--date", "2026-01-02")
+        self.js("assert", "Assets:银行卡", "100", "CNY", "--date", "2026-01-05")
+        self.js("spend", "5", "--from", "银行卡", "--category", "咖啡", "--date", "2026-01-03", "--override-lock", "late entry")
+        data = self.js("doctor", expect=1)["data"]
+        self.assertEqual([c["name"] for c in data["checks"] if not c["ok"]], ["assertions"])
 
 
 class Alignment(unittest.TestCase):

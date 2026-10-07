@@ -242,7 +242,7 @@ class Recording(IntentCase):
             record_intent(self.ledger, "spend", **kw)
         self.assertEqual(ctx.exception.code, "period_locked")
         with self.assertRaises(RuleError) as ctx:
-            record_intent(self.ledger, "spend", actor=AGENT, meta={"override_lock": "pls"}, **kw)
+            record_intent(self.ledger, "spend", actor=AGENT, confidence=1, meta={"override_lock": "pls"}, **kw)
         self.assertEqual(ctx.exception.code, "lock_override_denied")
         record_intent(self.ledger, "spend", meta={"override_lock": "forgot it"}, **kw)
 

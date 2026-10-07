@@ -45,7 +45,8 @@ class Persistence(LedgerTestCase):
         self.open_accounts()
         self.fund("Assets:CMB", "1234.56")
         self.ledger.add_txn(
-            "2026-10-07", [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")], status="pending", actor=AGENT
+            "2026-10-07", [(None, "5", "CNY"), ("Assets:CMB", "-5", "CNY")], status="pending",
+            actor=AGENT, confidence=0.5,
         )
         reopened = Ledger.open(self.root)
         self.assertEqual(reopened.state.balances(), self.ledger.state.balances())

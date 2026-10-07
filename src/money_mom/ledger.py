@@ -20,8 +20,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from .errors import LedgerError, ValidationError
-from .events import SCHEMA_VERSION, Event, check_currency, parse_event
+from .errors import LedgerError, RuleError, ValidationError
+from .events import SCHEMA_VERSION, Event, Txn, check_currency, parse_event
 from .ids import IdGenerator
 from .state import LedgerState, Problem
 
@@ -315,6 +315,7 @@ class Ledger:
                     raw = self._clamped(raw, fresh.last_ts)
                 try:
                     ev = parse_event(raw, where)
+                    self._check_write_policy(ev)
                     fresh.apply(ev)
                 except LedgerError as err:
                     err.where = err.where or where
@@ -331,6 +332,31 @@ class Ledger:
                     os.fsync(handle.fileno())
             self.state = fresh
         return events
+
+    def _check_write_policy(self, ev: Event) -> None:
+        """Rules about *who* may write what. They apply to new writes only, never to replay,
+        so changing the threshold later cannot make an old ledger unreadable.
+
+        `actor` is self-declared, so this protects against an agent that forgets or is
+        careless, not against one that lies. The agent's own permission prompts remain the
+        real boundary.
+        """
+        if not isinstance(ev, Txn) or ev.actor_type != "agent":
+            return
+        if ev.confidence is None:
+            raise RuleError(
+                "an agent must state a confidence (0 to 1) for every transaction it records; "
+                "pass --confidence, honestly",
+                code="confidence_required",
+            )
+        threshold = self.auto_post_confidence
+        if ev.status == "posted" and ev.confidence < threshold:
+            raise RuleError(
+                f"confidence {ev.confidence:g} is below the auto-post threshold {threshold:g}; "
+                "record it as pending (--status pending) and ask the user to confirm",
+                code="confidence_too_low",
+                details={"confidence": ev.confidence, "threshold": threshold},
+            )
 
     @staticmethod
     def _clamped(raw: dict[str, Any], last: _dt.datetime) -> dict[str, Any]:
