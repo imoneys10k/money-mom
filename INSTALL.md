@@ -152,6 +152,12 @@ Say what you installed, where the ledger is, and show them how to talk to you, f
 
 Mention that anything you are unsure of is kept as *pending* for them to confirm, and that nothing is ever deleted or edited, only corrected by adding entries.
 
+## Upgrading from an earlier version
+
+If `money-mom --version` prints an older version, run Step 2 again (`uv tool install` replaces the old version) and Step 3 again (it overwrites the skill), then Step 4. **The ledger needs no migration**: an existing ledger keeps working, and its SQLite cache rebuilds itself.
+
+One thing older ledgers lack: `exchange` records through an Equity account named `汇兑` (or `Conversions`). If `exchange` answers `no_conversion_account`, create it once with `money-mom open Equity:汇兑` (or `Equity:Conversions`). Ledgers created from the current templates already have it.
+
 ## Uninstall
 
 ```bash
